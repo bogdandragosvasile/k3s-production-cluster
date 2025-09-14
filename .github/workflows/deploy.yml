@@ -82,13 +82,19 @@ jobs:
       - name: Clean up any existing VMs
         run: |
           echo "🧹 Cleaning up any existing VMs before deployment..."
-          # Stop and undefine all k3s-production VMs
+          
+          # Force stop and undefine all k3s-production VMs
           for vm in $(virsh list --all --name | grep k3s-production || true); do
-            echo "Stopping VM: $vm"
+            echo "Force stopping VM: $vm"
+            virsh destroy $vm --graceful 2>/dev/null || true
+            sleep 2
             virsh destroy $vm 2>/dev/null || true
             echo "Undefining VM: $vm"
             virsh undefine $vm --remove-all-storage 2>/dev/null || true
           done
+          
+          # Wait a moment for cleanup to complete
+          sleep 5
           
           # Clean up any remaining volumes (but preserve base image)
           for vol in $(virsh vol-list --pool default | grep k3s-production | awk '{print $1}' || true); do
@@ -105,7 +111,15 @@ jobs:
           # Clean up directories
           rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
           
-          echo "✅ VM cleanup completed"
+          # Verify cleanup
+          REMAINING_VMS=$(virsh list --all --name | grep k3s-production | wc -l)
+          if [ "$REMAINING_VMS" -gt 0 ]; then
+            echo "❌ Warning: $REMAINING_VMS VMs still exist after cleanup"
+            virsh list --all --name | grep k3s-production
+            exit 1
+          else
+            echo "✅ VM cleanup completed successfully"
+          fi
 
       - name: Terraform Init
         run: |
