@@ -72,3 +72,29 @@ output "cluster_info" {
     dns = var.dns
   }
 }
+# Ansible inventory
+output "inventory" {
+  description = "Ansible inventory in YAML format"
+  value = templatefile("${path.module}/templates/inventory.tpl", {
+    master_nodes = {
+      for i in range(var.master_count) : "k3s-${var.cluster_name}-master-${i + 1}" => {
+        ip = cidrhost(var.network_cidr, var.master_ip_offset + i)
+      }
+    }
+    worker_nodes = {
+      for i in range(var.worker_count) : "k3s-${var.cluster_name}-worker-${i + 1}" => {
+        ip = cidrhost(var.network_cidr, var.worker_ip_offset + i)
+      }
+    }
+    storage_nodes = {
+      for i in range(var.storage_count) : "k3s-${var.cluster_name}-storage-${i + 1}" => {
+        ip = cidrhost(var.network_cidr, var.storage_ip_offset + i)
+      }
+    }
+    load_balancer_nodes = {
+      for i in range(var.lb_count) : "k3s-${var.cluster_name}-lb-${i + 1}" => {
+        ip = cidrhost(var.network_cidr, var.lb_ip_offset + i)
+      }
+    }
+  })
+}
