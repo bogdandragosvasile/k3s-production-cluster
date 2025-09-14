@@ -1,21 +1,21 @@
 # K3s Production Cluster - Outputs
-# Simplified version for pipeline
+# Minimal version for pipeline
 
 # Ansible inventory
 output "inventory" {
   description = "Ansible inventory in YAML format"
   value = templatefile("${path.module}/templates/inventory.tpl", {
     cluster_name = var.cluster_name
-    network_cidr = var.network_cidr
-    master_count = var.master_count
-    master_ip_offset = var.master_ip_offset
-    worker_count = var.worker_count
-    worker_ip_offset = var.worker_ip_offset
-    storage_count = var.storage_count
-    storage_ip_offset = var.storage_ip_offset
-    lb_count = var.lb_count
-    lb_ip_offset = var.lb_ip_offset
-    gpu_count = var.gpu_count
-    gpu_ip_offset = var.gpu_ip_offset
+    network_cidr = "192.168.122.0/24"
+    master_count = 3
+    master_ip_offset = 10
+    worker_count = 6
+    worker_ip_offset = 20
+    storage_count = 2
+    storage_ip_offset = 40
+    lb_count = 2
+    lb_ip_offset = 30
+    gpu_count = 1
+    gpu_ip_offset = 50
   })
 }
