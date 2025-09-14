@@ -1,0 +1,47 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base",
+    "schedule:weekly"
+  ],
+  "timezone": "UTC",
+  "schedule": ["before 9am on monday"],
+  "labels": ["dependencies"],
+  "assignees": ["bogdandragosvasile"],
+  "reviewers": ["bogdandragosvasile"],
+  "commitMessagePrefix": "chore:",
+  "commitMessageAction": "update",
+  "commitMessageTopic": "{{depName}}",
+  "commitMessageExtra": "to {{newVersion}}",
+  "packageRules": [
+    {
+      "matchPackageNames": ["hashicorp/setup-terraform", "actions/checkout", "actions/upload-artifact", "actions/download-artifact", "actions/cache"],
+      "groupName": "GitHub Actions",
+      "labels": ["github-actions", "dependencies"]
+    },
+    {
+      "matchPackageNames": ["dmacvicar/libvirt", "hashicorp/template"],
+      "groupName": "Terraform Providers",
+      "labels": ["terraform", "dependencies"]
+    },
+    {
+      "matchPackageNames": ["ansible", "ansible-lint"],
+      "groupName": "Ansible",
+      "labels": ["ansible", "dependencies"]
+    },
+    {
+      "matchPackageNames": ["k3s"],
+      "groupName": "K3s",
+      "labels": ["k3s", "dependencies"]
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security", "dependencies"],
+    "assignees": ["bogdandragosvasile"]
+  },
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "branchPrefix": "renovate/",
+  "automerge": false,
+  "requiredStatusChecks": null
+}

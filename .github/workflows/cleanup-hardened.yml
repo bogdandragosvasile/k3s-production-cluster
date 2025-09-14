@@ -1,0 +1,203 @@
+name: Cleanup K3s Production Cluster (Hardened)
+
+on:
+  repository_dispatch:
+    types: [cleanup]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to cleanup'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+        - development
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm cleanup'
+        required: true
+        type: string
+      force_cleanup:
+        description: 'Force cleanup even if Terraform state is missing'
+        required: false
+        default: false
+        type: boolean
+
+# Prevent concurrent runs
+concurrency:
+  group: k3s-production-cluster-cleanup-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: '1.6.0'
+  CLUSTER_NAME: 'k3s-production'
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  preflight:
+    name: Preflight Checks
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    outputs:
+      runner-valid: ${{ steps.preflight.result }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run preflight checks
+        id: preflight
+        run: |
+          echo "🔍 Running preflight checks..."
+          ./scripts/preflight-checks.sh
+          echo "runner-valid=true" >> $GITHUB_OUTPUT
+
+  validate-cleanup:
+    name: Validate Cleanup Request
+    needs: preflight
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Check confirmation
+        if: github.event.inputs.confirm_destroy != 'DESTROY'
+        run: |
+          echo "❌ Cleanup not confirmed. Please type 'DESTROY' to confirm."
+          exit 1
+
+      - name: Confirm cleanup
+        run: |
+          echo "✅ Cleanup confirmed for environment: ${{ env.ENVIRONMENT }}"
+          echo "⚠️  This will destroy all K3s cluster infrastructure!"
+          echo "🔒 Only resources with prefix 'k3s-production' will be affected"
+
+  terraform-destroy:
+    name: Terraform Destroy
+    needs: [preflight, validate-cleanup]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Download Terraform State
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-logs
+          path: terraform/
+        continue-on-error: ${{ github.event.inputs.force_cleanup == 'true' }}
+
+      - name: Terraform Destroy
+        run: |
+          cd terraform
+          if [[ -f "terraform.tfstate" ]]; then
+            echo "🗑️  Running terraform destroy..."
+            terraform init
+            terraform destroy -auto-approve
+            echo "✅ Terraform destroy completed"
+          else
+            echo "⚠️  No Terraform state found"
+            if [[ "${{ github.event.inputs.force_cleanup }}" == "true" ]]; then
+              echo "�� Force cleanup enabled, proceeding with manual cleanup"
+            else
+              echo "❌ Terraform state not found and force cleanup not enabled"
+              exit 1
+            fi
+          fi
+
+  manual-cleanup:
+    name: Manual Cleanup
+    needs: [preflight, validate-cleanup, terraform-destroy]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true' && (needs.terraform-destroy.result == 'failure' || github.event.inputs.force_cleanup == 'true')
+    steps:
+      - name: Clean up VMs
+        run: |
+          echo "🧹 Cleaning up VMs with prefix 'k3s-production'..."
+          
+          # List all VMs with our prefix
+          VMS=$(virsh list --all --name | grep k3s-production || true)
+          if [[ -n "$VMS" ]]; then
+            echo "Found VMs to clean up:"
+            echo "$VMS"
+            
+            # Force stop and undefine VMs
+            for vm in $VMS; do
+              echo "Destroying VM: $vm"
+              virsh destroy $vm 2>/dev/null || true
+              sleep 2
+              virsh undefine $vm --remove-all-storage 2>/dev/null || true
+            done
+          else
+            echo "No VMs found with prefix 'k3s-production'"
+          fi
+
+      - name: Clean up volumes
+        run: |
+          echo "🧹 Cleaning up volumes with prefix 'k3s-production'..."
+          
+          # List all volumes with our prefix
+          VOLUMES=$(virsh vol-list default | grep k3s-production | awk '{print $1}' || true)
+          if [[ -n "$VOLUMES" ]]; then
+            echo "Found volumes to clean up:"
+            echo "$VOLUMES"
+            
+            # Delete volumes
+            for vol in $VOLUMES; do
+              echo "Deleting volume: $vol"
+              virsh vol-delete --pool default $vol 2>/dev/null || true
+            done
+          else
+            echo "No volumes found with prefix 'k3s-production'"
+          fi
+
+      - name: Clean up cloud-init ISOs
+        run: |
+          echo "🧹 Cleaning up cloud-init ISO files..."
+          rm -f /var/lib/libvirt/images/*cloudinit*.iso 2>/dev/null || true
+          rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
+
+      - name: Verify cleanup
+        run: |
+          echo "🔍 Verifying cleanup..."
+          
+          # Check for remaining VMs
+          REMAINING_VMS=$(virsh list --all --name | grep k3s-production | wc -l)
+          if [[ "$REMAINING_VMS" -gt 0 ]]; then
+            echo "❌ Warning: $REMAINING_VMS VMs still exist after cleanup"
+            virsh list --all --name | grep k3s-production
+          else
+            echo "✅ No VMs found with prefix 'k3s-production'"
+          fi
+          
+          # Check for remaining volumes
+          REMAINING_VOLUMES=$(virsh vol-list default | grep k3s-production | wc -l)
+          if [[ "$REMAINING_VOLUMES" -gt 0 ]]; then
+            echo "❌ Warning: $REMAINING_VOLUMES volumes still exist after cleanup"
+            virsh vol-list default | grep k3s-production
+          else
+            echo "✅ No volumes found with prefix 'k3s-production'"
+          fi
+
+  notify-cleanup:
+    name: Notify Cleanup Status
+    needs: [preflight, validate-cleanup, terraform-destroy, manual-cleanup]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: always()
+    steps:
+      - name: Notify Success
+        if: needs.terraform-destroy.result == 'success' || needs.manual-cleanup.result == 'success'
+        run: |
+          echo "✅ K3s Production Cluster cleanup completed successfully!"
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+          echo "All cluster resources have been destroyed"
+
+      - name: Notify Failure
+        if: needs.terraform-destroy.result == 'failure' && needs.manual-cleanup.result == 'failure'
+        run: |
+          echo "❌ K3s Production Cluster cleanup failed!"
+          echo "Some resources may still exist. Check manually."
+          exit 1
