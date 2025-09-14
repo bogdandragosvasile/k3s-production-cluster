@@ -188,7 +188,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Terraform artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v5
         with:
           name: terraform-artifacts
           path: ansible/
@@ -301,7 +301,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Bootstrap artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v5
         with:
           name: bootstrap-artifacts
           path: ansible/
@@ -371,7 +371,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Bootstrap artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v5
         with:
           name: bootstrap-artifacts
           path: ansible/
@@ -412,7 +412,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Bootstrap artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v5
         with:
           name: bootstrap-artifacts
           path: ansible/
