@@ -52,7 +52,14 @@ jobs:
           virsh vol-delete $vol --pool default 2>/dev/null || true
         done
         
-        # Note: Base Ubuntu image is preserved for reuse
+        # Preserve base Ubuntu image for reuse
+        BASE_IMAGE="/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
+        if [ -f "$BASE_IMAGE" ]; then
+          echo "✅ Preserving base Ubuntu image: $BASE_IMAGE"
+          echo "📊 Image size: $(du -h $BASE_IMAGE | cut -f1)"
+        else
+          echo "⚠️ Base Ubuntu image not found: $BASE_IMAGE"
+        fi
         
         # Clean up pools and networks
         virsh pool-destroy k3s-production-pool 2>/dev/null || true

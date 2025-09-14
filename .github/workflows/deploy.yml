@@ -15,8 +15,55 @@ env:
   ANSIBLE_VERSION: '2.15.0'
 
 jobs:
+  prerequisites:
+    name: Prerequisites
+    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        run: |
+          echo "📦 Installing required packages..."
+          sudo apt update
+          sudo apt install -y wget curl
+
+      - name: Ensure base image exists
+        run: |
+          echo "🔍 Checking for base Ubuntu image..."
+          BASE_IMAGE="/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
+          
+          if [ -f "$BASE_IMAGE" ]; then
+            echo "✅ Base image already exists: $BASE_IMAGE"
+            echo "📊 Image size: $(du -h $BASE_IMAGE | cut -f1)"
+            echo "📅 Last modified: $(stat -c %y $BASE_IMAGE)"
+          else
+            echo "📥 Base image not found. Downloading..."
+            echo "🌐 Downloading from: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+            
+            cd /var/lib/libvirt/images
+            sudo wget -O ubuntu-24.04-server-cloudimg-amd64.img \
+              https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+            
+            echo "✅ Base image downloaded successfully"
+            echo "📊 Image size: $(du -h $BASE_IMAGE | cut -f1)"
+          fi
+
+      - name: Verify base image
+        run: |
+          BASE_IMAGE="/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
+          if [ -f "$BASE_IMAGE" ]; then
+            echo "✅ Base image verification passed"
+            echo "📊 File size: $(du -h $BASE_IMAGE | cut -f1)"
+            echo "🔍 File type: $(file $BASE_IMAGE)"
+          else
+            echo "❌ Base image verification failed"
+            exit 1
+          fi
+
   deploy-infrastructure:
     name: Deploy Infrastructure
+    needs: prerequisites
     runs-on: [self-hosted, linux, x64, k3s, hypervisor]
     steps:
       - name: Checkout code
@@ -59,18 +106,6 @@ jobs:
           rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
           
           echo "✅ VM cleanup completed"
-
-      - name: Ensure base image exists
-        run: |
-          echo "🔍 Checking for base Ubuntu image..."
-          if [ ! -f "/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img" ]; then
-            echo "📥 Downloading base Ubuntu image..."
-            cd /var/lib/libvirt/images
-            sudo wget -O ubuntu-24.04-server-cloudimg-amd64.img https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
-            echo "✅ Base image downloaded"
-          else
-            echo "✅ Base image already exists"
-          fi
 
       - name: Terraform Init
         run: |
