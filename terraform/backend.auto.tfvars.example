@@ -1,0 +1,44 @@
+# K3s Production Cluster - Backend Configuration Example
+# Copy this file to backend.auto.tfvars and configure for your environment
+# DO NOT commit backend.auto.tfvars to version control as it may contain secrets
+
+# Backend type: "local", "s3", "azurerm", "gcs"
+backend_type = "local"
+
+# Local filesystem backend configuration
+backend_local_path = "/var/lib/libvirt/terraform/k3s-production-cluster/terraform.tfstate"
+
+# S3/MinIO backend configuration
+backend_s3_bucket = "k3s-terraform-state"
+backend_s3_key = "k3s-production-cluster/terraform.tfstate"
+backend_s3_region = "us-west-2"
+backend_s3_endpoint = ""  # Leave empty for AWS S3, set for MinIO
+backend_s3_skip_credentials_validation = false
+backend_s3_skip_metadata_api_check = false
+backend_s3_force_path_style = false  # Set to true for MinIO
+
+# Azure Blob Storage backend configuration
+backend_azurerm_resource_group_name = "terraform-state-rg"
+backend_azurerm_storage_account_name = "k3sterraformstate"
+backend_azurerm_container_name = "tfstate"
+backend_azurerm_key = "k3s-production-cluster/terraform.tfstate"
+
+# Google Cloud Storage backend configuration
+backend_gcs_bucket = "k3s-terraform-state"
+backend_gcs_prefix = "k3s-production-cluster/"
+
+# Environment-specific overrides
+# These can be set via environment variables or terraform.tfvars
+# Example for production:
+# backend_type = "s3"
+# backend_s3_bucket = "prod-k3s-terraform-state"
+# backend_s3_key = "production/terraform.tfstate"
+
+# Example for staging:
+# backend_type = "s3"
+# backend_s3_bucket = "staging-k3s-terraform-state"
+# backend_s3_key = "staging/terraform.tfstate"
+
+# Example for development:
+# backend_type = "local"
+# backend_local_path = "/tmp/k3s-dev-terraform/terraform.tfstate"

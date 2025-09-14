@@ -7,14 +7,14 @@ set -euo pipefail
 echo "📋 Gathering comprehensive cluster logs..."
 
 # Colors for output
-RED='\033[0;31m'
+# # # RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
 LOG_DIR="${LOG_DIR:-./cluster-logs}"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+# # # TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 # Function to create log directory
 create_log_directory() {
@@ -121,8 +121,10 @@ gather_k8s_logs() {
     
     for pod in $(kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null || true); do
         if [[ -n "$pod" ]]; then
-            local namespace=$(echo "$pod" | cut -d'/' -f1)
-            local pod_name=$(echo "$pod" | cut -d'/' -f2)
+            local namespace
+            namespace=$(echo "$pod" | cut -d'/' -f1)
+            local pod_name
+            pod_name=$(echo "$pod" | cut -d'/' -f2)
             echo "    📋 $namespace/$pod_name"
             kubectl logs -n "$namespace" "$pod_name" > "$pod_log_dir/${namespace}-${pod_name}.log" 2>&1 || true
         fi

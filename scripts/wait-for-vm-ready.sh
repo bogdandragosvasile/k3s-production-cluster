@@ -24,13 +24,13 @@ check_cloud_init_status() {
     
     echo "🔍 Checking cloud-init status on $host..."
     
-    for i in $(seq 1 $max_attempts); do
+    for i in $(seq 1 "$max_attempts"); do
         if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@"$host" "cloud-init status --wait" 2>/dev/null; then
             echo -e "${GREEN}✅ Cloud-init completed on $host${NC}"
             return 0
         else
             echo "⏳ Cloud-init not ready on $host (attempt $i/$max_attempts)"
-            sleep $RETRY_INTERVAL
+            sleep "$RETRY_INTERVAL"
         fi
     done
     
@@ -45,13 +45,13 @@ check_ssh_connectivity() {
     
     echo "🔍 Checking SSH connectivity to $host..."
     
-    for i in $(seq 1 $max_attempts); do
+    for i in $(seq 1 "$max_attempts"); do
         if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@"$host" "echo 'SSH test successful'" 2>/dev/null; then
             echo -e "${GREEN}✅ SSH connectivity established to $host${NC}"
             return 0
         else
             echo "⏳ SSH not ready on $host (attempt $i/$max_attempts)"
-            sleep $RETRY_INTERVAL
+            sleep "$RETRY_INTERVAL"
         fi
     done
     
@@ -101,13 +101,13 @@ wait_for_k3s_api() {
     
     echo "🔍 Waiting for K3s API on $master_ip..."
     
-    for i in $(seq 1 $max_attempts); do
+    for i in $(seq 1 "$max_attempts"); do
         if curl -k -s https://"$master_ip":6443/healthz >/dev/null 2>&1; then
             echo -e "${GREEN}✅ K3s API is ready on $master_ip${NC}"
             return 0
         else
             echo "⏳ K3s API not ready on $master_ip (attempt $i/$max_attempts)"
-            sleep $RETRY_INTERVAL
+            sleep "$RETRY_INTERVAL"
         fi
     done
     

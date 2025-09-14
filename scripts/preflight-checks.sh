@@ -20,7 +20,7 @@ check_command() {
     
     if command -v "$cmd" >/dev/null 2>&1; then
         local version
-        version=$($cmd $version_flag 2>&1 | head -1)
+        version=$($cmd "$version_flag" 2>&1 | head -1)
         echo -e "${GREEN}✅ $name: $version${NC}"
         return 0
     else
@@ -152,9 +152,9 @@ fi
 # Check available disk space (need at least 20GB)
 AVAILABLE_DISK=$(df / | awk 'NR==2{print $4}')
 if [[ $AVAILABLE_DISK -ge 20971520 ]]; then  # 20GB in KB
-    echo -e "${GREEN}✅ Disk space: $(($AVAILABLE_DISK / 1024 / 1024))GB available (sufficient)${NC}"
+    echo -e "${GREEN}✅ Disk space: $((AVAILABLE_DISK / 1024 / 1024))GB available (sufficient)${NC}"
 else
-    echo -e "${YELLOW}⚠️  Disk space: $(($AVAILABLE_DISK / 1024 / 1024))GB available (may be insufficient)${NC}"
+    echo -e "${YELLOW}⚠️  Disk space: $((AVAILABLE_DISK / 1024 / 1024))GB available (may be insufficient)${NC}"
 fi
 
 echo ""
