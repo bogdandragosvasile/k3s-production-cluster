@@ -20,7 +20,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, k3s, hypervisor]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install required packages
         run: |
@@ -67,7 +67,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, k3s, hypervisor]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -147,7 +147,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, k3s, hypervisor]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Ansible
         run: |
