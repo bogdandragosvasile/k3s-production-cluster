@@ -1,0 +1,194 @@
+# K3s Production Cluster Configuration
+# This file defines the complete cluster specification
+
+cluster:
+  name: "k3s-production"
+  version: "v1.31.3+k3s1"
+  domain: "k3s.local"
+  
+  # Network Configuration
+  network:
+    pod_cidr: "10.42.0.0/16"
+    service_cidr: "10.43.0.0/16"
+    cluster_dns: "10.43.0.10"
+    
+  # Load Balancer Configuration
+  load_balancer:
+    vip: "192.168.1.10"  # Virtual IP for HA (using static pool)
+    range: "192.168.1.11-192.168.1.20"  # MetalLB range (static pool)
+
+# Control Plane Configuration
+control_plane:
+  count: 3
+  vm_prefix: "k3s-master"
+  resources:
+    cpu: 4
+    memory: "8Gi"
+    storage: "50Gi"
+  network:
+    ip_base: "192.168.1.10"  # Will be .10, .11, .12
+    gateway: "192.168.1.1"
+    dns: "192.168.1.1"
+
+# Worker Nodes Configuration
+workers:
+  count: 7  # Can be scaled 6-9
+  vm_prefix: "k3s-worker"
+  resources:
+    cpu: 8
+    memory: "16Gi"
+    storage: "100Gi"
+  network:
+    ip_base: "192.168.1.20"  # Will be .20, .21, .22, etc.
+    gateway: "192.168.1.1"
+    dns: "192.168.1.1"
+
+# Storage Nodes Configuration
+storage:
+  count: 2
+  vm_prefix: "k3s-storage"
+  resources:
+    cpu: 4
+    memory: "8Gi"
+    storage: "200Gi"
+  network:
+    ip_base: "192.168.1.30"  # Will be .30, .31
+    gateway: "192.168.1.1"
+    dns: "192.168.1.1"
+
+# Load Balancer Configuration
+load_balancers:
+  count: 2
+  vm_prefix: "k3s-lb"
+  resources:
+    cpu: 2
+    memory: "4Gi"
+    storage: "20Gi"
+  network:
+    ip_base: "192.168.1.40"  # Will be .40, .41
+    gateway: "192.168.1.1"
+    dns: "192.168.1.1"
+
+# GPU Node Configuration
+gpu_node:
+  enabled: true
+  count: 1
+  vm_prefix: "k3s-gpu"
+  resources:
+    cpu: 12
+    memory: "24Gi"
+    storage: "100Gi"
+  gpu:
+    passthrough: true
+    device: "0000:03:00.0"  # AMD Radeon RX 6500 XT
+  network:
+    ip_base: "192.168.1.50"  # Will be .50
+    gateway: "192.168.1.1"
+    dns: "192.168.1.1"
+
+# K3s Configuration
+k3s:
+  # Server Configuration
+  server_args:
+    - "--disable=traefik"  # We'll install Traefik separately
+    - "--disable=servicelb"  # We'll use MetalLB
+    - "--disable=local-storage"  # We'll use Longhorn
+    - "--write-kubeconfig-mode=644"
+    - "--tls-san=192.168.1.200"  # Load balancer VIP
+    - "--tls-san=k3s-api.k3s.local"
+    - "--cluster-cidr=10.42.0.0/16"
+    - "--service-cidr=10.43.0.0/16"
+    - "--cluster-dns=10.43.0.10"
+    - "--disable-network-policy"
+    - "--flannel-backend=vxlan"
+    
+  # Agent Configuration
+  agent_args:
+    - "--node-name"
+    - "--kubelet-arg=feature-gates=KubeletInUserNamespace=true"
+
+# Longhorn Configuration
+longhorn:
+  enabled: true
+  version: "1.6.0"
+  storage_class: "longhorn"
+  replicas: 3
+  backup:
+    enabled: true
+    target: "s3://k3s-backups"
+    schedule: "0 2 * * *"  # Daily at 2 AM
+
+# MetalLB Configuration
+metallb:
+  enabled: true
+  version: "0.13.12"
+  ip_pools:
+    - name: "production"
+      addresses: "192.168.1.201-192.168.1.220"
+      auto_assign: true
+
+# Traefik Configuration
+traefik:
+  enabled: true
+  version: "3.0"
+  dashboard:
+    enabled: true
+    domain: "traefik.k3s.local"
+  certificates:
+    email: "admin@k3s.local"
+    staging: false
+
+# Monitoring Configuration
+monitoring:
+  prometheus:
+    enabled: true
+    retention: "30d"
+    storage: "50Gi"
+  grafana:
+    enabled: true
+    admin_password: "admin123"  # Change in production
+  alertmanager:
+    enabled: true
+
+# Backup Configuration
+backup:
+  velero:
+    enabled: true
+    version: "1.12.0"
+    schedule: "0 3 * * *"  # Daily at 3 AM
+    retention: "7d"
+
+# Security Configuration
+security:
+  pod_security_standards:
+    enforced: "restricted"
+  network_policies:
+    enabled: true
+  rbac:
+    enabled: true
+  admission_controllers:
+    - "NodeRestriction"
+    - "ResourceQuota"
+    - "LimitRanger"
+    - "ServiceAccount"
+    - "TaintNodesByCondition"
+    - "Priority"
+    - "DefaultTolerationSeconds"
+    - "DefaultStorageClass"
+    - "StorageObjectInUseProtection"
+    - "PersistentVolumeClaimResize"
+    - "MutatingAdmissionWebhook"
+    - "ValidatingAdmissionWebhook"
+    - "RuntimeClass"
+
+# Resource Quotas
+resource_quotas:
+  default:
+    requests.cpu: "2"
+    requests.memory: "4Gi"
+    limits.cpu: "4"
+    limits.memory: "8Gi"
+    persistentvolumeclaims: "10"
+    services: "10"
+    secrets: "10"
+    configmaps: "10"

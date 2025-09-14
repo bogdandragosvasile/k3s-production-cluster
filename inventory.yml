@@ -1,0 +1,46 @@
+# K3s Production Cluster - Ansible Inventory
+# Generated for current VM setup
+
+all:
+  children:
+    masters:
+      hosts:
+        k3s-production-master-1:
+          ansible_host: 192.168.122.11
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+        k3s-production-master-2:
+          ansible_host: 192.168.122.12
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+        k3s-production-master-3:
+          ansible_host: 192.168.122.13
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+      vars:
+        node_role: master
+
+    workers:
+      hosts:
+        k3s-production-worker-1:
+          ansible_host: 192.168.122.21
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+        k3s-production-worker-2:
+          ansible_host: 192.168.122.22
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+        k3s-production-worker-3:
+          ansible_host: 192.168.122.23
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: /home/bogdan/.ssh/k3s-cluster
+      vars:
+        node_role: worker
+
+    k3s_cluster:
+      children:
+        masters
+        workers
+      vars:
+        ansible_python_interpreter: /usr/bin/python3
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

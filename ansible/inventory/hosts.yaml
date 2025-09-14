@@ -1,0 +1,87 @@
+all:
+  children:
+    k3s_masters:
+      hosts:
+        k3s-master-1:
+          ansible_host: 192.168.122.241
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-master-2:
+          ansible_host: 192.168.122.242
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-master-3:
+          ansible_host: 192.168.122.243
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+    k3s_workers:
+      hosts:
+        k3s-worker-1:
+          ansible_host: 192.168.122.244
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-2:
+          ansible_host: 192.168.122.245
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-3:
+          ansible_host: 192.168.122.246
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-4:
+          ansible_host: 192.168.122.247
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-5:
+          ansible_host: 192.168.122.248
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-6:
+          ansible_host: 192.168.122.249
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-worker-7:
+          ansible_host: 192.168.122.250
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+    k3s_storage:
+      hosts:
+        k3s-storage-1:
+          ansible_host: 192.168.122.251
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-storage-2:
+          ansible_host: 192.168.122.252
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+    k3s_loadbalancers:
+      hosts:
+        k3s-lb-1:
+          ansible_host: 192.168.122.253
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+        k3s-lb-2:
+          ansible_host: 192.168.122.254
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes
+    k3s_gpu:
+      hosts:
+        k3s-gpu-1:
+          ansible_host: 192.168.122.100
+          ansible_user: ubuntu
+          ansible_password: ubuntu
+          ansible_become: yes

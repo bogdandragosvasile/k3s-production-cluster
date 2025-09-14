@@ -1,0 +1,18 @@
+k3s_cluster:
+  children:
+    server:
+      hosts:
+        192.168.122.41:
+        192.168.122.242:
+        192.168.122.243:
+    agent:
+      hosts:
+        192.168.122.244:
+        192.168.122.245:
+        192.168.122.246:
+
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    k3s_version: "v1.33.4+k3s1"
+    api_endpoint: "192.168.122.41"

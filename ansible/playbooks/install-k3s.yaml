@@ -1,0 +1,244 @@
+---
+- name: Install K3s Cluster
+  hosts: all
+  gather_facts: yes
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_token: "{{ hostvars['k3s-production-master-1']['k3s_token'] | default('') }}"
+    k3s_server_ip: "192.168.122.11"
+  
+  tasks:
+    - name: Wait for VMs to be accessible
+      wait_for_connection:
+        timeout: 300
+        delay: 10
+
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: yes
+      become: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - wget
+          - vim
+          - htop
+          - net-tools
+          - openssh-server
+          - qemu-guest-agent
+          - jq
+        state: present
+      become: yes
+
+    - name: Enable and start services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      become: yes
+      loop:
+        - ssh
+        - qemu-guest-agent
+        - docker
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+      become: yes
+
+    - name: Set hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+      become: yes
+
+    - name: Configure passwordless sudo for ubuntu user
+      lineinfile:
+        path: /etc/sudoers.d/ubuntu
+        line: "ubuntu ALL=(ALL) NOPASSWD:ALL"
+        create: yes
+        mode: '0440'
+      become: yes
+
+    - name: Configure passwordless sudo for k3s user
+      lineinfile:
+        path: /etc/sudoers.d/k3s
+        line: "k3s ALL=(ALL) NOPASSWD:ALL"
+        create: yes
+        mode: '0440'
+      become: yes
+
+    - name: Create k3s user
+      user:
+        name: k3s
+        groups: sudo,docker
+        shell: /bin/bash
+        create_home: yes
+        password: "{{ 'k3s' | password_hash('sha512') }}"
+      become: yes
+
+    - name: Configure SSH for k3s user
+      block:
+        - name: Create .ssh directory for k3s user
+          file:
+            path: /home/k3s/.ssh
+            state: directory
+            owner: k3s
+            group: k3s
+            mode: '0700'
+          become: yes
+
+        - name: Copy SSH keys to k3s user
+          copy:
+            src: /home/ubuntu/.ssh/authorized_keys
+            dest: /home/k3s/.ssh/authorized_keys
+            owner: k3s
+            group: k3s
+            remote_src: yes
+            mode: '0600'
+          become: yes
+
+- name: Install K3s on master nodes
+  hosts: masters
+  gather_facts: no
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_server_ip: "192.168.122.241"
+  
+  tasks:
+    - name: Install K3s server on first master
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" sh -s server --cluster-init
+      become: yes
+      when: inventory_hostname == 'k3s-production-master-1'
+
+    - name: Wait for K3s to be ready on first master
+      wait_for:
+        port: 6443
+        host: "{{ k3s_server_ip }}"
+        timeout: 300
+      when: inventory_hostname == 'k3s-production-master-1'
+
+    - name: Get K3s token from first master
+      shell: cat /var/lib/rancher/k3s/server/token
+      become: yes
+      register: k3s_token_result
+      when: inventory_hostname == 'k3s-production-master-1'
+
+    - name: Set K3s token fact
+      set_fact:
+        k3s_token: "{{ k3s_token_result.stdout }}"
+      when: inventory_hostname == 'k3s-production-master-1'
+
+    - name: Install K3s server on additional masters
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL=https://{{ k3s_server_ip }}:6443 K3S_TOKEN="{{ hostvars['k3s-production-master-1']['k3s_token'] }}" sh -s server
+      become: yes
+      when: inventory_hostname != 'k3s-production-master-1'
+
+    - name: Wait for K3s to be ready
+      wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        timeout: 300
+
+- name: Install K3s on worker nodes
+  hosts: workers
+  gather_facts: no
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_server_ip: "192.168.122.241"
+  
+  tasks:
+    - name: Install K3s agent on workers
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL=https://{{ k3s_server_ip }}:6443 K3S_TOKEN="{{ hostvars['k3s-production-master-1']['k3s_token'] }}" sh -
+      become: yes
+
+    - name: Wait for K3s agent to be ready
+      wait_for:
+        port: 10250
+        host: "{{ ansible_host }}"
+        timeout: 300
+
+- name: Install K3s on storage nodes
+  hosts: storage
+  gather_facts: no
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_server_ip: "192.168.122.241"
+  
+  tasks:
+    - name: Install K3s agent on storage nodes
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL=https://{{ k3s_server_ip }}:6443 K3S_TOKEN="{{ hostvars['k3s-production-master-1']['k3s_token'] }}" sh -
+      become: yes
+
+    - name: Wait for K3s agent to be ready
+      wait_for:
+        port: 10250
+        host: "{{ ansible_host }}"
+        timeout: 300
+
+- name: Install K3s on load balancer nodes
+  hosts: loadbalancers
+  gather_facts: no
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_server_ip: "192.168.122.241"
+  
+  tasks:
+    - name: Install K3s agent on load balancer nodes
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL=https://{{ k3s_server_ip }}:6443 K3S_TOKEN="{{ hostvars['k3s-production-master-1']['k3s_token'] }}" sh -
+      become: yes
+
+    - name: Wait for K3s agent to be ready
+      wait_for:
+        port: 10250
+        host: "{{ ansible_host }}"
+        timeout: 300
+
+- name: Install K3s on GPU node
+  hosts: gpu
+  gather_facts: no
+  vars:
+    k3s_version: "v1.33.4+k3s1"
+    k3s_server_ip: "192.168.122.241"
+  
+  tasks:
+    - name: Install K3s agent on GPU node
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" K3S_URL=https://{{ k3s_server_ip }}:6443 K3S_TOKEN="{{ hostvars['k3s-production-master-1']['k3s_token'] }}" sh -
+      become: yes
+
+    - name: Wait for K3s agent to be ready
+      wait_for:
+        port: 10250
+        host: "{{ ansible_host }}"
+        timeout: 300
+
+- name: Verify K3s cluster
+  hosts: masters[0]
+  gather_facts: no
+  tasks:
+    - name: Get K3s kubeconfig
+      shell: sudo cat /etc/rancher/k3s/k3s.yaml
+      become: yes
+      register: k3s_kubeconfig
+
+    - name: Display cluster info
+      shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl get nodes -o wide
+      become: yes
+
+    - name: Display cluster status
+      shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl get pods -A
+      become: yes
