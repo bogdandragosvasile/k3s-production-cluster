@@ -166,7 +166,7 @@ jobs:
           ./scripts/setup-known-hosts.sh $ALL_IPS
 
       - name: Upload Terraform artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: terraform-artifacts
@@ -277,7 +277,7 @@ jobs:
           ansible all -i inventory.yml -m shell -a "sudo apt install -y curl wget git" --become
 
       - name: Upload Bootstrap artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: bootstrap-artifacts
@@ -352,7 +352,7 @@ jobs:
           fi
 
       - name: Upload K3s API readiness logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: k3s-api-readiness-logs
@@ -394,7 +394,7 @@ jobs:
           ansible-playbook -i inventory.yml playbooks/install-k3s.yaml --limit workers,storage,load_balancers
 
       - name: Upload Agent deployment logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: agent-deployment-logs
@@ -499,7 +499,7 @@ jobs:
           ./scripts/gather-logs.sh
 
       - name: Upload cluster artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cluster-artifacts
           path: |
