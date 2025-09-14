@@ -4,7 +4,9 @@
 network:
   version: 2
   ethernets:
-    ${interface}:
+    primary-nic:
+      match:
+        name: en*
       dhcp4: false
       dhcp6: false
       addresses:

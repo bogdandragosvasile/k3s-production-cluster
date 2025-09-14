@@ -4,7 +4,6 @@
   gather_facts: yes
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_token: "{{ hostvars['k3s-production-master-1']['k3s_token'] | default('') }}"
     k3s_server_ip: "192.168.122.11"
   
   tasks:
@@ -107,7 +106,7 @@
   gather_facts: no
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_server_ip: "192.168.122.241"
+    k3s_server_ip: "192.168.122.11"
   
   tasks:
     - name: Install K3s server on first master
@@ -151,7 +150,7 @@
   gather_facts: no
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_server_ip: "192.168.122.241"
+    k3s_server_ip: "192.168.122.11"
   
   tasks:
     - name: Install K3s agent on workers
@@ -170,7 +169,7 @@
   gather_facts: no
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_server_ip: "192.168.122.241"
+    k3s_server_ip: "192.168.122.11"
   
   tasks:
     - name: Install K3s agent on storage nodes
@@ -185,11 +184,11 @@
         timeout: 300
 
 - name: Install K3s on load balancer nodes
-  hosts: loadbalancers
+  hosts: load_balancers
   gather_facts: no
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_server_ip: "192.168.122.241"
+    k3s_server_ip: "192.168.122.11"
   
   tasks:
     - name: Install K3s agent on load balancer nodes
@@ -208,7 +207,7 @@
   gather_facts: no
   vars:
     k3s_version: "v1.33.4+k3s1"
-    k3s_server_ip: "192.168.122.241"
+    k3s_server_ip: "192.168.122.11"
   
   tasks:
     - name: Install K3s agent on GPU node
@@ -222,23 +221,53 @@
         host: "{{ ansible_host }}"
         timeout: 300
 
-- name: Verify K3s cluster
-  hosts: masters[0]
+- name: Setup Kubeconfig for Ansible Controller
+  hosts: k3s-production-master-1
   gather_facts: no
   tasks:
-    - name: Get K3s kubeconfig
-      shell: sudo cat /etc/rancher/k3s/k3s.yaml
+    - name: Get K3s token
+      shell: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
       become: yes
-      register: k3s_kubeconfig
 
-    - name: Display cluster info
-      shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl get nodes -o wide
+    - name: Download kubeconfig
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ./kubeconfig
+        flat: yes
       become: yes
+
+    - name: Update kubeconfig server address
+      replace:
+        path: ./kubeconfig
+        regexp: '127\.0\.0\.1'
+        replace: '192.168.122.11'
+
+    - name: Set kubeconfig permissions
+      file:
+        path: ./kubeconfig
+        mode: '0600'
+
+- name: Verify K3s cluster
+  hosts: k3s-production-master-1
+  gather_facts: no
+  tasks:
+    - name: Display cluster info
+      command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: ./kubeconfig
+      register: cluster_nodes
+
+    - name: Show cluster nodes
+      debug:
+        var: cluster_nodes.stdout_lines
 
     - name: Display cluster status
-      shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl get pods -A
-      become: yes
+      command: kubectl get pods -A
+      environment:
+        KUBECONFIG: ./kubeconfig
+      register: cluster_pods
+
+    - name: Show cluster pods
+      debug:
+        var: cluster_pods.stdout_lines

@@ -15,6 +15,7 @@ variable "base_image_path" {
 variable "ssh_public_key" {
   description = "SSH public key for VM access"
   type        = string
+  default     = ""
 }
 
 variable "network_interface" {

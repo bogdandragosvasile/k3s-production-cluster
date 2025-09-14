@@ -17,6 +17,11 @@ provider "libvirt" {
 
 # Variables are defined in variables.tf
 
+# Auto-detect SSH public key if not provided
+locals {
+  ssh_public_key = var.ssh_public_key != "" ? var.ssh_public_key : file("~/.ssh/id_rsa.pub")
+}
+
 # Use existing default network (assume it exists)
 
 # Base volume from cloud image
@@ -68,7 +73,7 @@ resource "libvirt_cloudinit_disk" "masters" {
   name           = "${local.masters[count.index].name}-cloudinit.iso"
   user_data      = templatefile("${path.module}/templates/cloud_init_user_data.tpl", {
     hostname   = local.masters[count.index].name,
-    public_key = var.ssh_public_key
+    public_key = local.ssh_public_key
   })
   network_config = templatefile("${path.module}/templates/cloud_init_network_config.tpl", {
     ip      = local.masters[count.index].ip,
@@ -124,7 +129,7 @@ resource "libvirt_cloudinit_disk" "workers" {
   name           = "${local.workers[count.index].name}-cloudinit.iso"
   user_data      = templatefile("${path.module}/templates/cloud_init_user_data.tpl", {
     hostname   = local.workers[count.index].name,
-    public_key = var.ssh_public_key
+    public_key = local.ssh_public_key
   })
   network_config = templatefile("${path.module}/templates/cloud_init_network_config.tpl", {
     ip      = local.workers[count.index].ip,
@@ -180,7 +185,7 @@ resource "libvirt_cloudinit_disk" "storage" {
   name           = "${local.storage[count.index].name}-cloudinit.iso"
   user_data      = templatefile("${path.module}/templates/cloud_init_user_data.tpl", {
     hostname   = local.storage[count.index].name,
-    public_key = var.ssh_public_key
+    public_key = local.ssh_public_key
   })
   network_config = templatefile("${path.module}/templates/cloud_init_network_config.tpl", {
     ip      = local.storage[count.index].ip,
@@ -236,7 +241,7 @@ resource "libvirt_cloudinit_disk" "load_balancers" {
   name           = "${local.load_balancers[count.index].name}-cloudinit.iso"
   user_data      = templatefile("${path.module}/templates/cloud_init_user_data.tpl", {
     hostname   = local.load_balancers[count.index].name,
-    public_key = var.ssh_public_key
+    public_key = local.ssh_public_key
   })
   network_config = templatefile("${path.module}/templates/cloud_init_network_config.tpl", {
     ip      = local.load_balancers[count.index].ip,
