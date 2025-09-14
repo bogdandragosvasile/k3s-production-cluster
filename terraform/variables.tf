@@ -9,7 +9,7 @@ variable "cluster_name" {
 variable "base_image_path" {
   description = "Path to the base Ubuntu cloud image"
   type        = string
-  default     = "/var/lib/libvirt/images/ubuntu-24.04-cloudimg-amd64.img"
+  default     = "/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
 }
 
 variable "ssh_public_key" {
