@@ -43,7 +43,7 @@ jobs:
             virsh undefine $vm --remove-all-storage 2>/dev/null || true
           done
           
-          # Clean up any remaining volumes
+          # Clean up any remaining volumes (but preserve base image)
           for vol in $(virsh vol-list --pool default | grep k3s-production | awk '{print $1}' || true); do
             echo "Removing volume: $vol"
             virsh vol-delete $vol --pool default 2>/dev/null || true
@@ -59,6 +59,18 @@ jobs:
           rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
           
           echo "✅ VM cleanup completed"
+
+      - name: Ensure base image exists
+        run: |
+          echo "🔍 Checking for base Ubuntu image..."
+          if [ ! -f "/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img" ]; then
+            echo "📥 Downloading base Ubuntu image..."
+            cd /var/lib/libvirt/images
+            sudo wget -O ubuntu-24.04-server-cloudimg-amd64.img https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+            echo "✅ Base image downloaded"
+          else
+            echo "✅ Base image already exists"
+          fi
 
       - name: Terraform Init
         run: |

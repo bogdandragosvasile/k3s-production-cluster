@@ -46,11 +46,13 @@ jobs:
           virsh undefine $vm --remove-all-storage 2>/dev/null || true
         done
         
-        # Clean up any remaining volumes
+        # Clean up any remaining volumes (but preserve base image)
         for vol in $(virsh vol-list --pool default | grep k3s-production | awk '{print $1}' || true); do
           echo "Removing volume: $vol"
           virsh vol-delete $vol --pool default 2>/dev/null || true
         done
+        
+        # Note: Base Ubuntu image is preserved for reuse
         
         # Clean up pools and networks
         virsh pool-destroy k3s-production-pool 2>/dev/null || true
