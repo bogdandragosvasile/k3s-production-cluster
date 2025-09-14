@@ -87,14 +87,3 @@ output "inventory" {
       }
     }
     storage_nodes = {
-      for i in range(var.storage_count) : "k3s-${var.cluster_name}-storage-${i + 1}" => {
-        ip = cidrhost(var.network_cidr, var.storage_ip_offset + i)
-      }
-    }
-    load_balancer_nodes = {
-      for i in range(var.lb_count) : "k3s-${var.cluster_name}-lb-${i + 1}" => {
-        ip = cidrhost(var.network_cidr, var.lb_ip_offset + i)
-      }
-    }
-  })
-}
