@@ -1,170 +1,178 @@
 # K3s Production Cluster
 
-A highly available K3s cluster deployed on KVM with distributed storage (Longhorn) and load balancing (MetalLB). This setup is inspired by the [k8s-libvirt-cluster](https://github.com/bogdandragosvasile/k8s-libvirt-cluster) repository and provides a robust, production-ready Kubernetes environment.
+A complete Infrastructure as Code (IaC) solution for deploying a production-ready K3s cluster using Terraform, Ansible, and GitHub Actions.
 
 ## 🏗️ Architecture
 
-### Cluster Configuration
-- **3 Master Nodes**: 4GB RAM, 2 vCPU each
-- **3 Worker Nodes**: 8GB RAM, 4 vCPU each  
-- **2 Storage Nodes**: 4GB RAM, 2 vCPU each
-- **2 Load Balancer Nodes**: 1GB RAM, 1 vCPU each
+### Infrastructure Components
+- **3 Master Nodes**: High availability control plane
+- **6 Worker Nodes**: Application workload execution
+- **2 Storage Nodes**: Dedicated storage for Longhorn
+- **2 Load Balancer Nodes**: Traffic distribution
+- **1 GPU Node**: GPU-accelerated workloads
 
-### Network Configuration
-- **Network**: Default libvirt network (192.168.122.0/24)
-- **Gateway**: 192.168.122.1
-- **DNS**: 8.8.8.8, 8.8.4.4
-- **Static IPs**: 192.168.122.11-42
-
-### Storage & Load Balancing
-- **Distributed Storage**: Longhorn (3 replicas)
-- **Load Balancing**: MetalLB (192.168.122.100-150 range)
-- **Ingress**: Traefik (built into K3s)
+### Technology Stack
+- **Infrastructure**: Terraform + libvirt
+- **Configuration**: Ansible
+- **Orchestration**: K3s (lightweight Kubernetes)
+- **CI/CD**: GitHub Actions with self-hosted runner
+- **Storage**: Longhorn (distributed storage)
+- **Load Balancing**: MetalLB
+- **Monitoring**: Prometheus + Grafana (ready)
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+- Ubuntu 24.04 LTS hypervisor
+- libvirt/KVM installed and configured
+- GitHub Actions self-hosted runner
+- SSH key pair (`~/.ssh/id_rsa`)
 
-1. **System Requirements**:
-   - Ubuntu 24.04 LTS host
-   - KVM/QEMU support
-   - Libvirt installed and configured
-   - At least 32GB RAM and 200GB storage
-
-2. **Required Software**:
+### Deploy Cluster
+1. **Manual Deployment**:
    ```bash
-   # Install required packages
-   sudo apt update
-   sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virt-manager
-   sudo apt install -y terraform ansible jq
+   # Deploy infrastructure
+   cd terraform
+   terraform init
+   terraform apply
    
-   # Add user to libvirt group
-   sudo usermod -aG libvirt $USER
-   newgrp libvirt
+   # Deploy K3s cluster
+   cd ../ansible
+   ansible-playbook -i inventory.yml playbooks/install-k3s.yaml
    ```
 
-3. **Download Base Image**:
-   ```bash
-   # Download Ubuntu 24.04 LTS cloud image
-   wget https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img \
-        -O /var/lib/libvirt/images/ubuntu-24.04-cloudimg-amd64.img
-   ```
+2. **CI/CD Deployment**:
+   - Go to GitHub Actions → "Deploy K3s Production Cluster"
+   - Click "Run workflow" → "Run workflow"
 
-4. **Generate SSH Key**:
+### Cleanup Cluster
+1. **Manual Cleanup**:
    ```bash
-   # Generate SSH key for cluster access
-   ssh-keygen -t ed25519 -f ~/.ssh/k3s-cluster -C 'k3s-cluster@production'
-   ```
-
-### Deployment
-
-1. **Clone Repository**:
-   ```bash
-   git clone <repository-url>
-   cd k3s-production-cluster
-   ```
-
-2. **Deploy Cluster**:
-   ```bash
-   # Run the comprehensive deployment script
-   ./scripts/deploy-k3s-cluster.sh
-   ```
-
-3. **Verify Deployment**:
-   ```bash
-   # Check cluster status
-   kubectl get nodes
-   kubectl get pods --all-namespaces
+   # Destroy with Terraform
+   cd terraform
+   terraform destroy
    
-   # Check Longhorn
-   kubectl get pods -n longhorn-system
-   
-   # Check MetalLB
-   kubectl get pods -n metallb-system
+   # Manual cleanup
+   for vm in $(virsh list --all --name | grep k3s-production); do
+     virsh destroy $vm 2>/dev/null || true
+     virsh undefine $vm --remove-all-storage 2>/dev/null || true
+   done
    ```
 
-## 📁 Project Structure
+2. **CI/CD Cleanup**:
+   - Go to GitHub Actions → "Cleanup K3s Production Cluster"
+   - Click "Run workflow"
+   - Type "DESTROY" to confirm
+   - Click "Run workflow"
 
-```
-k3s-production-cluster/
-├── ansible/                    # Ansible playbooks and roles
-│   ├── inventory.yml          # Generated inventory file
-│   ├── ansible.cfg            # Ansible configuration
-│   └── playbooks/             # K3s, Longhorn, MetalLB playbooks
-├── configs/                    # Cluster configuration files
-│   └── cluster-config.yaml    # K3s cluster configuration
-├── scripts/                    # Deployment and utility scripts
-│   ├── deploy-k3s-cluster.sh  # Main deployment script
-│   ├── cleanup-cluster.sh     # Comprehensive cleanup script
-│   └── setup-*.sh             # Individual component scripts
-├── terraform/                  # Infrastructure as Code
-│   ├── main.tf                # Main Terraform configuration
-│   ├── variables.tf           # Terraform variables
-│   ├── outputs.tf             # Terraform outputs
-│   └── templates/              # Cloud-init templates
-└── docs/                       # Documentation
-    └── deployment-guide.md    # Detailed deployment guide
-```
+## 📋 GitHub Actions Workflows
+
+### 1. Deploy Workflow (`deploy.yml`)
+**Triggers**: Push to main, Manual dispatch
+
+**Steps**:
+1. **Infrastructure Deployment**:
+   - Clean up existing VMs
+   - Initialize Terraform
+   - Plan and apply infrastructure
+   - Generate Ansible inventory
+
+2. **K3s Cluster Deployment**:
+   - Wait for VMs to be ready
+   - Fix repository issues
+   - Deploy K3s cluster
+   - Setup kubectl
+   - Validate cluster
+
+3. **Notification**:
+   - Success/failure notifications
+
+### 2. Cleanup Workflow (`cleanup.yml`)
+**Triggers**: Manual dispatch, Scheduled (optional)
+
+**Steps**:
+1. **Verification**: Confirm destruction with "DESTROY"
+2. **VM Cleanup**: Stop and undefine all VMs
+3. **Volume Cleanup**: Remove all associated volumes
+4. **Network Cleanup**: Destroy pools and networks
+5. **State Cleanup**: Clean Terraform state and SSH known hosts
+6. **Verification**: Confirm complete cleanup
 
 ## 🔧 Configuration
 
-### Cluster Configuration
-Edit `configs/cluster-config.yaml` to customize:
-- Cluster name and version
-- Network CIDRs
-- Load balancer VIP and range
-- Node counts and resources
+### Network Configuration
+- **CIDR**: 192.168.122.0/24
+- **Master IPs**: 192.168.122.11-13
+- **Worker IPs**: 192.168.122.21-26
+- **Storage IPs**: 192.168.122.31-32
+- **Load Balancer IPs**: 192.168.122.41-42
+- **GPU IP**: 192.168.122.51
 
-### Terraform Variables
-Edit `terraform/variables.tf` to customize:
-- Base image path
-- SSH public key
-- Network configuration
-- Node specifications
+### VM Specifications
+- **Masters**: 2 vCPU, 4GB RAM, 20GB disk
+- **Workers**: 4 vCPU, 8GB RAM, 30GB disk
+- **Storage**: 2 vCPU, 4GB RAM, 20GB disk
+- **Load Balancers**: 1 vCPU, 1GB RAM, 10GB disk
+- **GPU**: 4 vCPU, 8GB RAM, 30GB disk
 
-### Ansible Configuration
-Edit `ansible/ansible.cfg` to customize:
-- SSH settings
-- Inventory location
-- Playbook execution options
+## 🛠️ Customization
 
-## 🛠️ Management Commands
+### Adding Nodes
+1. Update `terraform/variables.tf`:
+   ```hcl
+   variable "worker_count" {
+     default = 8  # Increase from 6
+   }
+   ```
 
-### Deploy Cluster
+2. Update IP ranges in `terraform/main.tf`
+
+3. Run deployment workflow
+
+### Changing K3s Version
+1. Update `ansible/playbooks/install-k3s.yaml`:
+   ```yaml
+   K3S_VERSION: "v1.33.4+k3s1"  # Change version
+   ```
+
+2. Run deployment workflow
+
+### Adding Storage
+1. Update `terraform/variables.tf`:
+   ```hcl
+   variable "storage_count" {
+     default = 4  # Increase from 2
+   }
+   ```
+
+2. Run deployment workflow
+
+## 🔍 Monitoring and Validation
+
+### Cluster Health Check
 ```bash
-./scripts/deploy-k3s-cluster.sh
+# Get kubeconfig
+scp ubuntu@192.168.122.11:/etc/rancher/k3s/k3s.yaml ./kubeconfig
+sed -i "s/127.0.0.1/192.168.122.11/g" kubeconfig
+export KUBECONFIG=./kubeconfig
+
+# Check cluster status
+kubectl get nodes
+kubectl get pods -A
+kubectl get services
 ```
 
-### Clean Up Cluster
-```bash
-./scripts/cleanup-cluster.sh
-```
-
-### Individual Component Deployment
-```bash
-# Deploy infrastructure only
-cd terraform && terraform apply
-
-# Deploy K3s cluster
-cd ansible && ansible-playbook -i inventory.yml playbooks/k3s-cluster.yml
-
-# Deploy Longhorn
-cd ansible && ansible-playbook -i inventory.yml playbooks/longhorn.yml
-
-# Deploy MetalLB
-cd ansible && ansible-playbook -i inventory.yml playbooks/metallb.yml
-```
-
-### Access VMs
+### Access Cluster
 ```bash
 # SSH to master node
-ssh -i ~/.ssh/k3s-cluster ubuntu@192.168.122.11
+ssh ubuntu@192.168.122.11
 
-# SSH to worker node
-ssh -i ~/.ssh/k3s-cluster ubuntu@192.168.122.21
+# Check K3s status
+sudo systemctl status k3s
+sudo k3s kubectl get nodes
 ```
 
-## 🔍 Troubleshooting
+## 🚨 Troubleshooting
 
 ### Common Issues
 
@@ -174,117 +182,38 @@ ssh -i ~/.ssh/k3s-cluster ubuntu@192.168.122.21
    - Check available disk space
 
 2. **SSH Connection Fails**:
-   - Wait for cloud-init to complete
-   - Check VM status: `sudo virsh list --all`
-   - Verify SSH key configuration
+   - Verify SSH key is correct
+   - Check VM is running
+   - Remove old host keys: `ssh-keygen -R <ip>`
 
-3. **K3s Installation Fails**:
-   - Check VM connectivity
-   - Verify Ansible inventory
+3. **Ansible Playbook Fails**:
+   - Check inventory file
+   - Verify SSH connectivity
+   - Check package repositories
+
+4. **K3s Installation Fails**:
+   - Check VM resources
+   - Verify network connectivity
    - Check system requirements
 
-4. **Longhorn/MetalLB Issues**:
-   - Check cluster connectivity
-   - Verify node labels
-   - Check resource availability
-
-### Debug Commands
-
+### Logs and Debugging
 ```bash
-# Check VM status
-sudo virsh list --all
+# Check VM logs
+virsh console <vm-name>
 
-# Check VM console
-sudo virsh console <vm-name>
+# Check K3s logs
+sudo journalctl -u k3s -f
 
-# Check libvirt logs
-sudo journalctl -u libvirtd
-
-# Check Ansible connectivity
-ansible all -m ping
-
-# Check K3s status
-kubectl get nodes
-kubectl describe nodes
+# Check Ansible logs
+ansible-playbook -i inventory.yml playbooks/install-k3s.yaml -vvv
 ```
-
-## 📊 Monitoring
-
-### Cluster Health
-```bash
-# Check node status
-kubectl get nodes -o wide
-
-# Check pod status
-kubectl get pods --all-namespaces
-
-# Check cluster events
-kubectl get events --sort-by=.metadata.creationTimestamp
-```
-
-### Storage Monitoring
-```bash
-# Check Longhorn status
-kubectl get pods -n longhorn-system
-kubectl get pv
-kubectl get pvc
-
-# Check storage usage
-kubectl top nodes
-kubectl top pods --all-namespaces
-```
-
-### Load Balancer Monitoring
-```bash
-# Check MetalLB status
-kubectl get pods -n metallb-system
-kubectl get svc --all-namespaces
-
-# Check load balancer configuration
-kubectl get configmap -n metallb-system
-```
-
-## 🔒 Security
-
-### SSH Access
-- Uses ED25519 SSH keys
-- Password authentication disabled
-- Key-based access only
-
-### Network Security
-- Isolated libvirt network
-- No external network exposure by default
-- Firewall rules as needed
-
-### Kubernetes Security
-- RBAC enabled
-- Network policies supported
-- Pod security standards
-
-## 🚀 Production Considerations
-
-### High Availability
-- 3 master nodes for quorum
-- Distributed storage with replication
-- Load balancer redundancy
-
-### Scalability
-- Easy to add worker nodes
-- Horizontal pod autoscaling
-- Resource quotas and limits
-
-### Backup & Recovery
-- Longhorn backup capabilities
-- VM snapshot support
-- Configuration version control
 
 ## 📚 Additional Resources
 
 - [K3s Documentation](https://k3s.io/)
-- [Longhorn Documentation](https://longhorn.io/docs/)
-- [MetalLB Documentation](https://metallb.universe.tf/)
-- [Terraform Libvirt Provider](https://registry.terraform.io/providers/dmacvicar/libvirt/latest)
+- [Terraform libvirt Provider](https://registry.terraform.io/providers/dmacvicar/libvirt/latest)
 - [Ansible Documentation](https://docs.ansible.com/)
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)
 
 ## 🤝 Contributing
 
@@ -298,8 +227,13 @@ kubectl get configmap -n metallb-system
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🙏 Acknowledgments
+## 🆘 Support
 
-- Inspired by [k8s-libvirt-cluster](https://github.com/bogdandragosvasile/k8s-libvirt-cluster)
-- Built with [K3s](https://k3s.io/), [Longhorn](https://longhorn.io/), and [MetalLB](https://metallb.universe.tf/)
-- Infrastructure managed with [Terraform](https://terraform.io/) and [Ansible](https://ansible.com/)
+For issues and questions:
+1. Check the troubleshooting section
+2. Review GitHub Issues
+3. Create a new issue with detailed information
+
+---
+
+**⚠️ Important**: This is a production-ready setup. Always test in a development environment first and ensure you have proper backups before deploying to production.

@@ -50,11 +50,8 @@ runcmd:
   - apt-get update
   - apt-get upgrade -y
   
-  # Install Docker
-  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-  - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-  - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io
+  # Install Docker (using Ubuntu package to avoid conflicts)
+  - apt-get install -y docker.io
   - systemctl enable docker
   - systemctl start docker
   - usermod -aG docker ubuntu
@@ -64,11 +61,8 @@ runcmd:
   - chmod +x kubectl
   - mv kubectl /usr/local/bin/
   
-  # Install Helm
-  - curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | tee /usr/share/keyrings/helm.gpg > /dev/null
-  - echo "deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list
-  - apt-get update
-  - apt-get install -y helm
+  # Install Helm (using snap to avoid repository conflicts)
+  - snap install helm --classic
   
   # Configure system limits
   - echo "* soft nofile 65536" >> /etc/security/limits.conf

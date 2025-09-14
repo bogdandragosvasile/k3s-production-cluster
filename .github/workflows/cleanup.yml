@@ -1,0 +1,145 @@
+name: Cleanup K3s Production Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm infrastructure destruction'
+        required: true
+        default: ''
+        type: string
+  schedule:
+    # Run cleanup every Sunday at 2 AM UTC (optional - can be removed)
+    - cron: '0 2 * * 0'
+
+jobs:
+  cleanup-infrastructure:
+    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Verify destruction confirmation
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+          echo "❌ Destruction not confirmed. Please type 'DESTROY' to proceed."
+          exit 1
+        fi
+        echo "✅ Destruction confirmed. Proceeding with cleanup..."
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.6.0
+        terraform_wrapper: false
+        
+    - name: Clean up any existing VMs
+      run: |
+        echo "🧹 Cleaning up any existing VMs..."
+        # Stop and undefine all k3s-production VMs
+        for vm in $(virsh list --all --name | grep k3s-production || true); do
+          echo "Stopping VM: $vm"
+          virsh destroy $vm 2>/dev/null || true
+          echo "Undefining VM: $vm"
+          virsh undefine $vm --remove-all-storage 2>/dev/null || true
+        done
+        
+        # Clean up any remaining volumes
+        for vol in $(virsh vol-list --pool default | grep k3s-production | awk '{print $1}' || true); do
+          echo "Removing volume: $vol"
+          virsh vol-delete $vol --pool default 2>/dev/null || true
+        done
+        
+        # Clean up pools and networks
+        virsh pool-destroy k3s-production-pool 2>/dev/null || true
+        virsh pool-undefine k3s-production-pool 2>/dev/null || true
+        virsh net-destroy k3s-production-network 2>/dev/null || true
+        virsh net-undefine k3s-production-network 2>/dev/null || true
+        
+        # Clean up directories
+        rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
+        
+        echo "✅ VM cleanup completed"
+        
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: |
+        terraform init
+        
+    - name: Terraform Destroy
+      working-directory: ./terraform
+      run: |
+        echo "🗑️ Destroying infrastructure with Terraform..."
+        terraform destroy -auto-approve
+        
+    - name: Clean up Terraform state
+      run: |
+        echo "🧹 Cleaning up Terraform state files..."
+        cd terraform
+        rm -f terraform.tfstate* .terraform.lock.hcl
+        rm -rf .terraform
+        
+    - name: Clean up Ansible inventory
+      run: |
+        echo "🧹 Cleaning up Ansible inventory..."
+        rm -f ansible/inventory.yml
+        
+    - name: Clean up SSH known hosts
+      run: |
+        echo "🧹 Cleaning up SSH known hosts..."
+        # Remove all k3s-production entries from known_hosts
+        sed -i '/k3s-production/d' ~/.ssh/known_hosts 2>/dev/null || true
+        sed -i '/192\.168\.122\./d' ~/.ssh/known_hosts 2>/dev/null || true
+        
+    - name: Verify cleanup
+      run: |
+        echo "🔍 Verifying cleanup..."
+        
+        # Check for remaining VMs
+        REMAINING_VMS=$(virsh list --all --name | grep k3s-production | wc -l)
+        if [ "$REMAINING_VMS" -gt 0 ]; then
+          echo "⚠️ Warning: $REMAINING_VMS k3s-production VMs still exist"
+          virsh list --all --name | grep k3s-production
+        else
+          echo "✅ No k3s-production VMs found"
+        fi
+        
+        # Check for remaining volumes
+        REMAINING_VOLS=$(virsh vol-list --pool default | grep k3s-production | wc -l)
+        if [ "$REMAINING_VOLS" -gt 0 ]; then
+          echo "⚠️ Warning: $REMAINING_VOLS k3s-production volumes still exist"
+          virsh vol-list --pool default | grep k3s-production
+        else
+          echo "✅ No k3s-production volumes found"
+        fi
+        
+        # Check for remaining pools
+        if virsh pool-list --all | grep -q k3s-production; then
+          echo "⚠️ Warning: k3s-production pool still exists"
+        else
+          echo "✅ No k3s-production pools found"
+        fi
+        
+        # Check for remaining networks
+        if virsh net-list --all | grep -q k3s-production; then
+          echo "⚠️ Warning: k3s-production network still exists"
+        else
+          echo "✅ No k3s-production networks found"
+        fi
+        
+    - name: Cleanup Summary
+      run: |
+        echo "🎉 Cleanup completed!"
+        echo "📊 Summary:"
+        echo "  - VMs: Destroyed and undefined"
+        echo "  - Volumes: Removed"
+        echo "  - Pools: Destroyed and undefined"
+        echo "  - Networks: Destroyed and undefined"
+        echo "  - Terraform state: Cleaned"
+        echo "  - Ansible inventory: Removed"
+        echo "  - SSH known hosts: Cleaned"
+        echo ""
+        echo "✅ Infrastructure cleanup completed successfully!"
+        echo "💡 You can now run the deploy workflow to create a fresh cluster."
