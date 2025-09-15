@@ -289,6 +289,7 @@ data "template_file" "inventory" {
     storage2_ip    = local.storage[1].ip
     lb1_ip         = local.load_balancers[0].ip
     lb2_ip         = local.load_balancers[1].ip
+    ssh_public_key = "~/.ssh/id_rsa"
   }
 }
 

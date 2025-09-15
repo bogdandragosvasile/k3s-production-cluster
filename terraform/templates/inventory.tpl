@@ -3,38 +3,31 @@
 
 [all:vars]
 ansible_user=ubuntu
-ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_ssh_private_key_file=${ssh_public_key}
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 ansible_python_interpreter=/usr/bin/python3
 
 # Master nodes
 [masters]
-k3s-production-master-1 ansible_host=192.168.122.11
-k3s-production-master-2 ansible_host=192.168.122.12
-k3s-production-master-3 ansible_host=192.168.122.13
+k3s-production-master-1 ansible_host=${master1_ip}
+k3s-production-master-2 ansible_host=${master2_ip}
+k3s-production-master-3 ansible_host=${master3_ip}
 
 # Worker nodes
 [workers]
-k3s-production-worker-1 ansible_host=192.168.122.21
-k3s-production-worker-2 ansible_host=192.168.122.22
-k3s-production-worker-3 ansible_host=192.168.122.23
-k3s-production-worker-4 ansible_host=192.168.122.24
-k3s-production-worker-5 ansible_host=192.168.122.25
-k3s-production-worker-6 ansible_host=192.168.122.26
+k3s-production-worker-1 ansible_host=${worker1_ip}
+k3s-production-worker-2 ansible_host=${worker2_ip}
+k3s-production-worker-3 ansible_host=${worker3_ip}
 
 # Storage nodes
 [storage]
-k3s-production-storage-1 ansible_host=192.168.122.31
-k3s-production-storage-2 ansible_host=192.168.122.32
+k3s-production-storage-1 ansible_host=${storage1_ip}
+k3s-production-storage-2 ansible_host=${storage2_ip}
 
 # Load balancer nodes
 [load_balancers]
-k3s-production-lb-1 ansible_host=192.168.122.41
-k3s-production-lb-2 ansible_host=192.168.122.42
-
-# GPU nodes
-[gpu]
-k3s-production-gpu-1 ansible_host=192.168.122.51
+k3s-production-lb-1 ansible_host=${lb1_ip}
+k3s-production-lb-2 ansible_host=${lb2_ip}
 
 # K3s cluster
 [k3s_cluster:children]
@@ -42,11 +35,7 @@ masters
 workers
 load_balancers
 storage
-gpu
 
 # All nodes
 [all_nodes:children]
 k3s_cluster
-
-
-
