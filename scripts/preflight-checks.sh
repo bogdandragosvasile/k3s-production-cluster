@@ -60,8 +60,20 @@ echo ""
 echo "🔐 Checking permissions..."
 
 # Check sudo access for libvirt
-check_sudo_access "virsh version" "libvirt sudo access" || ((FAILURES++))
-check_sudo_access "virsh list" "virsh list access" || ((FAILURES++))
+# Check virsh commands directly (user should be in libvirt group)
+if virsh version >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ virsh version: Working${NC}"
+else
+    echo -e "${RED}❌ virsh version: Failed - check libvirt group membership${NC}"
+    ((FAILURES++))
+fi
+
+if virsh list >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ virsh list: Working${NC}"
+else
+    echo -e "${RED}❌ virsh list: Failed - check libvirt group membership${NC}"
+    ((FAILURES++))
+fi
 
 # Check if user is in libvirt group
 if groups | grep -q libvirt; then
