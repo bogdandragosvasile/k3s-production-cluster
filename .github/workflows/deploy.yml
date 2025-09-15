@@ -1,63 +1,47 @@
-name: Deploy K3s Production Cluster
+name: Deploy K3s Cluster
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+        - development
+        - staging
+        - production
 
 env:
   TF_VERSION: '1.6.0'
   ANSIBLE_VERSION: '2.15.0'
+  K3S_VERSION: 'v1.33.4+k3s1'
+  CLUSTER_NAME: 'k3s-production'
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'development' }}
 
 jobs:
-  prerequisites:
-    name: Prerequisites
-    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+  preflight:
+    name: Preflight Checks
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    outputs:
+      runner-valid: ${{ steps.preflight.result }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install required packages
+      - name: Run preflight checks
+        id: preflight
         run: |
-          echo "📦 Installing required packages..."
-          sudo apt update
-          sudo apt install -y wget curl
+          echo "🔍 Running preflight checks..."
+          ./scripts/preflight-checks.sh
+          echo "runner-valid=true" >> $GITHUB_OUTPUT
 
-      - name: Ensure base image exists
-        run: |
-          echo "🔍 Checking for base Ubuntu image..."
-          BASE_IMAGE="/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
-          
-          if [ -f "$BASE_IMAGE" ]; then
-            echo "✅ Base image already exists: $BASE_IMAGE"
-            echo "📊 Image size: $(du -h $BASE_IMAGE | cut -f1)"
-            echo "📅 Last modified: $(stat -c %y $BASE_IMAGE)"
-          else
-            echo "📥 Base image not found. Downloading..."
-            echo "🌐 Downloading from: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
-            
-            cd /var/lib/libvirt/images
-            sudo wget -O ubuntu-24.04-server-cloudimg-amd64.img \
-              https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
-            
-            echo "✅ Base image downloaded successfully"
-            echo "📊 Image size: $(du -h $BASE_IMAGE | cut -f1)"
-          fi
-
-      - name: Verify base image
-        run: |
-          BASE_IMAGE="/var/lib/libvirt/images/ubuntu-24.04-server-cloudimg-amd64.img"
-          if [ -f "$BASE_IMAGE" ]; then
-            echo "✅ Base image verification passed"
-            echo "📊 File size: $(du -h $BASE_IMAGE | cut -f1)"
-            echo "🔍 File type: $(file $BASE_IMAGE)"
-          else
-            echo "❌ Base image verification failed"
-            exit 1
-          fi
-
-  deploy-infrastructure:
-    name: Deploy Infrastructure
-    needs: prerequisites
-    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+  terraform_infra:
+    name: Terraform Infrastructure
+    needs: preflight
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,77 +51,33 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Setup Ansible
+      - name: Check existing VMs
         run: |
-          sudo apt update
-          sudo apt install -y ansible ansible-lint
-
-      - name: Clean up any existing VMs
-        run: |
-          echo "🧹 Cleaning up any existing VMs before deployment..."
-          
-          # Force stop and undefine all k3s-production VMs
-          for vm in $(virsh list --all --name | grep k3s-production || true); do
-            echo "Force stopping VM: $vm"
-            virsh destroy $vm --graceful 2>/dev/null || true
-            sleep 2
-            virsh destroy $vm 2>/dev/null || true
-            echo "Undefining VM: $vm"
-            virsh undefine $vm --remove-all-storage 2>/dev/null || true
-          done
-          
-          # Wait a moment for cleanup to complete
-          sleep 5
-          
-          # Clean up any remaining volumes (but preserve base image)
-          for vol in $(virsh vol-list --pool default | grep k3s-production | awk '{print $1}' || true); do
-            echo "Removing volume: $vol"
-            virsh vol-delete $vol --pool default 2>/dev/null || true
-          done
-          
-          # Clean up pools and networks
-          virsh pool-destroy k3s-production-pool 2>/dev/null || true
-          virsh pool-undefine k3s-production-pool 2>/dev/null || true
-          virsh net-destroy k3s-production-network 2>/dev/null || true
-          virsh net-undefine k3s-production-network 2>/dev/null || true
-          
-          # Clean up directories
-          rm -rf /var/lib/libvirt/images/k3s-production 2>/dev/null || true
-          
-          # Verify cleanup
-          REMAINING_VMS=$(virsh list --all --name | grep k3s-production | wc -l)
-          if [ "$REMAINING_VMS" -gt 0 ]; then
-            echo "❌ Warning: $REMAINING_VMS VMs still exist after cleanup"
-            virsh list --all --name | grep k3s-production
-            exit 1
+          echo "🔍 Checking for existing VMs..."
+          if virsh list --all | grep -q "k3s-"; then
+            echo "⚠️  Existing VMs found, destroying them first..."
+            virsh list --all | grep "k3s-" | awk '{print $2}' | xargs -r virsh destroy
+            virsh list --all | grep "k3s-" | awk '{print $2}' | xargs -r virsh undefine
+            echo "✅ Existing VMs destroyed"
           else
-            echo "✅ VM cleanup completed successfully"
+            echo "✅ No existing VMs found"
           fi
 
       - name: Terraform Init
+        working-directory: terraform
         run: |
-          cd terraform
           terraform init
 
-      - name: Terraform Plan
-        run: |
-          cd terraform
-          terraform plan -out=tfplan
-
       - name: Terraform Apply
+        working-directory: terraform
         run: |
-          cd terraform
-          terraform apply -auto-approve tfplan
+          terraform apply -auto-approve
 
-      - name: Generate Ansible Inventory
-        run: |
-          cd terraform
-          terraform output -raw inventory > ../ansible/inventory.yml
-
-  deploy-k3s:
-    name: Deploy K3s Cluster
-    needs: deploy-infrastructure
-    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+  ansible_k3s:
+    name: Install K3s
+    needs: [preflight, terraform_infra]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -145,57 +85,48 @@ jobs:
       - name: Setup Ansible
         run: |
           sudo apt update
-          sudo apt install -y ansible ansible-lint
+          sudo apt install -y ansible
 
-      - name: Wait for VMs to be ready
+      - name: Install K3s
         run: |
-          cd ansible
-          ansible all -i inventory.yml -m wait_for_connection -e "timeout=300"
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/install-k3s.yaml -v
 
-      - name: Fix repository issues
-        run: |
-          cd ansible
-          echo "🔧 Fixing repository issues on VMs..."
-          ansible all -i inventory.yml -m shell -a "rm -f /etc/apt/sources.list.d/helm-stable-debian.list" --become
-          ansible all -i inventory.yml -m shell -a "apt-get update" --become
-
-      - name: Deploy K3s
-        run: |
-          cd ansible
-          ansible-playbook -i inventory.yml playbooks/install-k3s.yaml
+  validate:
+    name: Validate Cluster
+    needs: [preflight, terraform_infra, ansible_k3s]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Setup kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
-      - name: Get kubeconfig and validate cluster
+      - name: Download kubeconfig
         run: |
-          # Get kubeconfig from first master node
-          MASTER_IP="192.168.122.11"
-          scp -o StrictHostKeyChecking=no ubuntu@$MASTER_IP:/etc/rancher/k3s/k3s.yaml ./kubeconfig
-          sed -i "s/127.0.0.1/$MASTER_IP/g" kubeconfig
-          export KUBECONFIG=./kubeconfig
-          
-          # Validate cluster
+          ./scripts/fix-kubeconfig.sh
+
+      - name: Validate cluster
+        run: |
           kubectl get nodes
           kubectl get pods -A
 
   notify:
-    name: Notify Deployment Status
-    needs: [deploy-k3s]
-    runs-on: [self-hosted, linux, x64, k3s, hypervisor]
+    name: Notify Completion
+    needs: [preflight, terraform_infra, ansible_k3s, validate]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     if: always()
     steps:
-      - name: Notify Success
-        if: needs.deploy-k3s.result == 'success'
+      - name: Notify completion
         run: |
-          echo "✅ K3s cluster deployed successfully!"
-          echo "Cluster is ready for production workloads."
-
-      - name: Notify Failure
-        if: needs.deploy-k3s.result == 'failure'
-        run: |
-          echo "❌ K3s cluster deployment failed!"
-          echo "Check the logs for details."
+          if [ "${{ needs.validate.result }}" == "success" ]; then
+            echo "✅ K3s cluster deployed successfully!"
+            echo "Environment: ${{ env.ENVIRONMENT }}"
+            echo "🎉 Ready for production workloads!"
+          else
+            echo "❌ K3s cluster deployment failed!"
+            echo "Check the logs for details."
+          fi
