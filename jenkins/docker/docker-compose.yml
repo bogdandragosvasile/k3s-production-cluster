@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  jenkins-controller:
+    image: jenkins/jenkins:lts
+    container_name: jenkins-controller
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/libvirt:/var/run/libvirt
+      - /var/lib/libvirt:/var/lib/libvirt
+      - /home/bogdan/GitHub/k3s-production-cluster:/workspace
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+      - JENKINS_OPTS=--httpPort=8080
+    networks:
+      - jenkins
+    restart: unless-stopped
+
+  jenkins-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: k3s-jenkins-agent:latest
+    container_name: jenkins-agent
+    privileged: true
+    volumes:
+      - /var/run/libvirt:/var/run/libvirt
+      - /var/lib/libvirt:/var/lib/libvirt
+      - /home/bogdan/GitHub/k3s-production-cluster:/workspace
+      - /home/bogdan/.ssh:/home/jenkins/.ssh:ro
+    environment:
+      - JENKINS_URL=http://jenkins-controller:8080
+      - JENKINS_AGENT_NAME=k3s-agent
+      - JENKINS_AGENT_WORKDIR=/home/jenkins/workspace
+    networks:
+      - jenkins
+    depends_on:
+      - jenkins-controller
+    restart: unless-stopped
+    command: >
+      java -jar /usr/local/bin/jenkins-agent.jar
+      -jnlpUrl http://jenkins-controller:8080/computer/k3s-agent/slave-agent.jnlp
+      -secret @secret-file
+      -workDir /home/jenkins/workspace
+
+volumes:
+  jenkins_home:
+
+networks:
+  jenkins:
+    driver: bridge
