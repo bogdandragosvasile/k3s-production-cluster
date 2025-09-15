@@ -1,13 +1,7 @@
 name: Deploy K3s Production Cluster (Hardened)
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'terraform/**'
-      - 'ansible/**'
-      - 'scripts/**'
-      - '.github/workflows/deploy-hardened.yml'
+on:
   workflow_dispatch:
     inputs:
       environment:
