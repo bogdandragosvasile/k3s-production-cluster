@@ -1,13 +1,6 @@
 name: Deploy K3s Production Cluster
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'terraform/**'
-      - 'ansible/**'
-      - 'scripts/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 env:
