@@ -1,0 +1,435 @@
+name: Deploy K3s Production Cluster (Hardened)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy-hardened.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+        - development
+      force_cleanup:
+        description: 'Force cleanup before deployment'
+        required: false
+        default: false
+        type: boolean
+
+# Prevent concurrent runs
+concurrency:
+  group: k3s-production-cluster-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: '1.6.0'
+  ANSIBLE_VERSION: '2.15.0'
+  K3S_VERSION: 'v1.33.4+k3s1'
+  CLUSTER_NAME: 'k3s-production'
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  preflight:
+    name: Preflight Checks
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    outputs:
+      runner-valid: ${{ steps.preflight.result }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run preflight checks
+        id: preflight
+        run: |
+          echo "🔍 Running preflight checks..."
+          ./scripts/preflight-checks.sh
+          echo "runner-valid=true" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH key
+        if: steps.preflight.result == 'success'
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+  terraform-infra:
+    name: Terraform Infrastructure
+    needs: preflight
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    outputs:
+      inventory-content: ${{ steps.generate-inventory.outputs.content }}
+      master-ips: ${{ steps.generate-inventory.outputs.master-ips }}
+      worker-ips: ${{ steps.generate-inventory.outputs.worker-ips }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup SSH key
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v3
+        with:
+          path: |
+            terraform/.terraform
+            terraform/.terraform.lock.hcl
+          key: terraform-${{ hashFiles('terraform/versions.tf', 'terraform/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-
+
+      - name: Check IP collisions
+        run: |
+          echo "🔍 Checking for IP address collisions..."
+          ./scripts/check-ip-collisions.sh
+
+      - name: Clean up existing VMs (if forced)
+        if: github.event.inputs.force_cleanup == 'true'
+        run: |
+          echo "🧹 Force cleanup requested, removing existing VMs..."
+          for vm in $(virsh list --all --name | grep k3s-production || true); do
+            echo "Destroying VM: $vm"
+            virsh destroy $vm 2>/dev/null || true
+            virsh undefine $vm --remove-all-storage 2>/dev/null || true
+          done
+
+      - name: Create Terraform state directory
+        run: |
+          sudo mkdir -p /var/lib/libvirt/terraform/k3s-production-cluster
+          sudo chown -R $USER:$USER /var/lib/libvirt/terraform/k3s-production-cluster
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          # Pass SSH public key to Terraform
+          export TF_VAR_ssh_public_key="$(cat $SSH_PUBLIC_KEY_PATH)"
+          terraform plan -out=tfplan -detailed-exitcode > terraform-plan.log 2>&1
+        continue-on-error: true
+
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          # Pass SSH public key to Terraform
+          export TF_VAR_ssh_public_key="$(cat $SSH_PUBLIC_KEY_PATH)"
+          terraform apply -auto-approve tfplan > terraform-apply.log 2>&1
+
+      - name: Generate Ansible Inventory
+        id: generate-inventory
+        run: |
+          cd terraform
+          terraform output -raw inventory > ../ansible/inventory.yml
+          
+          # Extract IPs for other jobs
+          MASTER_IPS=$(terraform output -json master_ips | jq -r '.[]' | tr '\n' ' ')
+          WORKER_IPS=$(terraform output -json worker_ips | jq -r '.[]' | tr '\n' ' ')
+          
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          cat ../ansible/inventory.yml >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "master-ips=$MASTER_IPS" >> $GITHUB_OUTPUT
+          echo "worker-ips=$WORKER_IPS" >> $GITHUB_OUTPUT
+
+      - name: Upload Terraform logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: terraform-logs
+          path: |
+            terraform/terraform.tfstate
+            terraform/terraform.tfstate.backup
+            terraform/terraform-plan.log
+            terraform/terraform-apply.log
+          retention-days: 7
+
+  ansible-bootstrap:
+    name: Ansible Bootstrap
+    needs: [preflight, terraform-infra]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible=${{ env.ANSIBLE_VERSION }}-* ansible-lint
+          echo "ANSIBLE_PYTHON_INTERPRETER=/usr/bin/python3" >> $GITHUB_ENV
+
+      - name: Setup SSH key
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+      - name: Wait for VMs to be ready
+        run: |
+          cd ansible
+          echo "⏳ Waiting for VMs to be ready..."
+          
+          # Extract IPs from inventory
+          MASTER_IPS=$(ansible masters -i inventory.yml --list-hosts | grep -v "hosts" | tr -d ' ' | tr '\n' ' ')
+          WORKER_IPS=$(ansible workers -i inventory.yml --list-hosts | grep -v "hosts" | tr -d ' ' | tr '\n' ' ')
+          STORAGE_IPS=$(ansible storage -i inventory.yml --list-hosts | grep -v "hosts" | tr -d ' ' | tr '\n' ' ')
+          LB_IPS=$(ansible load_balancers -i inventory.yml --list-hosts | grep -v "hosts" | tr -d ' ' | tr '\n' ' ')
+          
+          # Wait for each group with proper readiness gates
+          echo "🔍 Checking master nodes..."
+          ./scripts/wait-for-vm-ready.sh masters $MASTER_IPS || echo "Some master VMs not ready yet"
+          
+          echo "🔍 Checking worker nodes..."
+          ./scripts/wait-for-vm-ready.sh workers $WORKER_IPS || echo "Some worker VMs not ready yet"
+          
+          echo "🔍 Checking storage nodes..."
+          ./scripts/wait-for-vm-ready.sh storage $STORAGE_IPS || echo "Some storage VMs not ready yet"
+          
+          echo "🔍 Checking load balancer nodes..."
+          ./scripts/wait-for-vm-ready.sh load_balancers $LB_IPS || echo "Some load balancer VMs not ready yet"
+
+      - name: Bootstrap VMs
+        run: |
+          cd ansible
+          echo "🔧 Bootstrapping VMs..."
+          ansible all -i inventory.yml -m shell -a "sudo apt update && sudo apt upgrade -y" --become
+          ansible all -i inventory.yml -m shell -a "sudo apt install -y curl wget git" --become
+
+      - name: Upload Ansible logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: ansible-bootstrap-logs
+          path: |
+            ansible/inventory.yml
+          retention-days: 7
+
+  k3s-control-plane:
+    name: K3s Control Plane
+    needs: [preflight, terraform-infra, ansible-bootstrap]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible=${{ env.ANSIBLE_VERSION }}-* ansible-lint
+          echo "ANSIBLE_PYTHON_INTERPRETER=/usr/bin/python3" >> $GITHUB_ENV
+
+      - name: Setup SSH key
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+      - name: Deploy K3s Control Plane
+        run: |
+          cd ansible
+          echo "🚀 Deploying K3s control plane..."
+          ansible-playbook -i inventory.yml playbooks/install-k3s.yaml --limit masters
+
+      - name: Wait for K3s API
+        run: |
+          cd ansible
+          echo "⏳ Waiting for K3s API to be ready..."
+          MASTER_IP=$(ansible masters -i inventory.yml --list-hosts | grep -v "hosts" | head -1 | tr -d ' ')
+          echo "Master IP: $MASTER_IP"
+          
+          # Wait for K3s API with proper readiness check
+          ./scripts/wait-for-vm-ready.sh --k3s-api "$MASTER_IP"
+
+  k3s-agents:
+    name: K3s Agents
+    needs: [preflight, terraform-infra, ansible-bootstrap, k3s-control-plane]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible=${{ env.ANSIBLE_VERSION }}-* ansible-lint
+          echo "ANSIBLE_PYTHON_INTERPRETER=/usr/bin/python3" >> $GITHUB_ENV
+
+      - name: Setup SSH key
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+      - name: Deploy K3s Agents
+        run: |
+          cd ansible
+          echo "🚀 Deploying K3s agents..."
+          ansible-playbook -i inventory.yml playbooks/install-k3s.yaml --limit workers,storage,load_balancers
+
+  validate-cluster:
+    name: Validate Cluster
+    needs: [preflight, terraform-infra, ansible-bootstrap, k3s-control-plane, k3s-agents]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: Setup SSH key
+        run: |
+          echo "🔑 Setting up SSH key..."
+          ./scripts/setup-ssh-key.sh
+          
+          # Load key into SSH agent
+          eval "$(ssh-agent -s)"
+          ssh-add "$SSH_PRIVATE_KEY_PATH"
+          echo "✅ SSH key loaded into agent"
+
+      - name: Get kubeconfig
+        run: |
+          cd ansible
+          MASTER_IP=$(ansible masters -i inventory.yml --list-hosts | grep -v "hosts" | head -1 | tr -d ' ')
+          echo "Master IP: $MASTER_IP"
+          
+          # Download kubeconfig
+          scp -o StrictHostKeyChecking=no ubuntu@$MASTER_IP:/etc/rancher/k3s/k3s.yaml ./kubeconfig
+          
+          # Update server address
+          sed -i "s/127.0.0.1/$MASTER_IP/g" kubeconfig
+          chmod 600 kubeconfig
+          
+          export KUBECONFIG=./kubeconfig
+
+      - name: Validate cluster
+        run: |
+          export KUBECONFIG=./kubeconfig
+          echo "🔍 Validating cluster..."
+          
+          # Wait for all nodes to be ready
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          
+          # Get cluster info
+          echo "📊 Cluster nodes:"
+          kubectl get nodes -o wide
+          
+          echo "📊 Cluster pods:"
+          kubectl get pods -A
+          
+          echo "📊 Cluster services:"
+          kubectl get svc -A
+
+      - name: Generate health report
+        run: |
+          export KUBECONFIG=./kubeconfig
+          echo "📋 Generating health report..."
+          
+          cat > health-report.md << 'HEALTH_EOF'
+          # K3s Cluster Health Report
+          
+          **Environment:** ${{ env.ENVIRONMENT }}
+          **Cluster Name:** ${{ env.CLUSTER_NAME }}
+          **Generated:** $(date)
+          
+          ## Nodes
+          \`\`\`
+          $(kubectl get nodes -o wide)
+          \`\`\`
+          
+          ## Pods
+          \`\`\`
+          $(kubectl get pods -A)
+          \`\`\`
+          
+          ## Services
+          \`\`\`
+          $(kubectl get svc -A)
+          \`\`\`
+          
+          ## API Health
+          \`\`\`
+          $(kubectl get --raw /readyz)
+          \`\`\`
+          HEALTH_EOF
+
+      - name: Gather comprehensive logs
+        run: |
+          echo "📋 Gathering comprehensive cluster logs..."
+          ./scripts/gather-logs.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: cluster-artifacts
+          path: |
+            kubeconfig
+            health-report.md
+            cluster-logs/
+          retention-days: 30
+
+  notify-deployment:
+    name: Notify Deployment Status
+    needs: [preflight, terraform-infra, ansible-bootstrap, k3s-control-plane, k3s-agents, validate-cluster]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: always()
+    steps:
+      - name: Notify Success
+        if: needs.validate-cluster.result == 'success'
+        run: |
+          echo "✅ K3s Production Cluster deployed successfully!"
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+          echo "Cluster artifacts uploaded for download"
+
+      - name: Notify Failure
+        if: needs.validate-cluster.result == 'failure'
+        run: |
+          echo "❌ K3s Production Cluster deployment failed!"
+          echo "Check the logs for details"
+          exit 1
