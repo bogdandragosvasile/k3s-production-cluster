@@ -52,6 +52,17 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
+      - name: Check existing VMs
+        run: |
+          echo "🔍 Checking for existing VMs..."
+          if virsh list --all | grep -q "k3s-"; then
+            echo "⚠️  Existing VMs found, destroying them first..."
+            virsh list --all | grep "k3s-" | awk "{print $2}" | xargs -r virsh destroy
+            virsh list --all | grep "k3s-" | awk "{print $2}" | xargs -r virsh undefine
+            echo "✅ Existing VMs destroyed"
+          else
+            echo "✅ No existing VMs found"
+          fi
         working-directory: terraform
         run: |
           terraform init
