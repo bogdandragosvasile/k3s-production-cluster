@@ -1,0 +1,240 @@
+name: Scale K3s Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to scale'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      preset:
+        description: 'Scaling preset to apply'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - minimal
+          - development
+          - staging
+          - production
+          - high-load
+          - gpu-enabled
+          - cost-optimized
+          - ha-minimal
+      cluster_name:
+        description: 'Cluster name'
+        required: false
+        default: 'k3s'
+        type: string
+      force:
+        description: 'Force scaling even if cluster is not ready'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Show what would be changed without applying'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  TF_VERSION: '1.6.0'
+  ANSIBLE_VERSION: '2.15.0'
+
+jobs:
+  scale-cluster:
+    name: Scale K3s Cluster
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible ansible-lint
+
+      - name: Setup kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: Verify scaling scripts
+        run: |
+          echo "Checking scaling scripts..."
+          ls -la scripts/scale-cluster.sh
+          ls -la scripts/scaling-presets.sh
+          chmod +x scripts/scale-cluster.sh
+          chmod +x scripts/scaling-presets.sh
+
+      - name: Show current cluster state
+        run: |
+          echo "Current cluster state:"
+          if [[ -f "terraform/terraform.tfstate" ]]; then
+            cd terraform
+            terraform output || echo "No Terraform outputs available"
+            cd ..
+          else
+            echo "No Terraform state found"
+          fi
+          
+          if [[ -f "kubeconfig" ]]; then
+            echo "Kubernetes cluster status:"
+            KUBECONFIG="./kubeconfig" kubectl get nodes || echo "Cannot connect to cluster"
+          else
+            echo "No kubeconfig found"
+          fi
+
+      - name: Apply scaling preset
+        run: |
+          echo "Applying preset: ${{ inputs.preset }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Cluster name: ${{ inputs.cluster_name }}"
+          echo "Force: ${{ inputs.force }}"
+          echo "Dry run: ${{ inputs.dry_run }}"
+          
+          # Build command arguments
+          CMD_ARGS=""
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            CMD_ARGS="$CMD_ARGS --dry-run"
+          fi
+          if [[ "${{ inputs.force }}" == "true" ]]; then
+            CMD_ARGS="$CMD_ARGS --force"
+          fi
+          
+          # Apply the preset
+          ./scripts/scaling-presets.sh \
+            ${{ inputs.preset }} \
+            --environment "${{ inputs.environment }}" \
+            --cluster-name "${{ inputs.cluster_name }}" \
+            $CMD_ARGS
+
+      - name: Verify cluster health
+        if: inputs.dry_run != 'true'
+        run: |
+          echo "Verifying cluster health..."
+          
+          # Wait for cluster to be ready
+          echo "Waiting for cluster to be ready..."
+          max_attempts=30
+          attempt=1
+          
+          while [[ $attempt -le $max_attempts ]]; do
+            if KUBECONFIG="./kubeconfig" kubectl get nodes &>/dev/null; then
+              ready_nodes=$(KUBECONFIG="./kubeconfig" kubectl get nodes --no-headers | grep -c "Ready" || echo "0")
+              total_nodes=$(KUBECONFIG="./kubeconfig" kubectl get nodes --no-headers | wc -l)
+              
+              if [[ $ready_nodes -eq $total_nodes && $total_nodes -gt 0 ]]; then
+                echo "✅ All $total_nodes nodes are ready"
+                break
+              fi
+              
+              echo "Attempt $attempt/$max_attempts: $ready_nodes/$total_nodes nodes ready"
+            else
+              echo "Attempt $attempt/$max_attempts: Cannot connect to cluster"
+            fi
+            
+            sleep 10
+            ((attempt++))
+          done
+          
+          if [[ $attempt -gt $max_attempts ]]; then
+            echo "❌ Cluster verification timeout"
+            exit 1
+          fi
+
+      - name: Show final cluster state
+        if: inputs.dry_run != 'true'
+        run: |
+          echo "Final cluster state:"
+          echo "==================="
+          
+          # Show Terraform outputs
+          if [[ -f "terraform/terraform.tfstate" ]]; then
+            echo "Terraform state:"
+            cd terraform
+            terraform output
+            cd ..
+          fi
+          
+          # Show Kubernetes cluster status
+          if [[ -f "kubeconfig" ]]; then
+            echo "Kubernetes cluster:"
+            KUBECONFIG="./kubeconfig" kubectl get nodes
+            echo ""
+            echo "Pods status:"
+            KUBECONFIG="./kubeconfig" kubectl get pods -A
+          fi
+
+      - name: Generate scaling report
+        if: inputs.dry_run != 'true'
+        run: |
+          echo "Generating scaling report..."
+          
+          # Create scaling report
+          cat > scaling-report.md << REPORT_EOF
+          # K3s Cluster Scaling Report
+          
+          **Date:** $(date)
+          **Environment:** ${{ inputs.environment }}
+          **Cluster:** ${{ inputs.cluster_name }}
+          **Preset:** ${{ inputs.preset }}
+          
+          ## Cluster Configuration
+          
+          REPORT_EOF
+          
+          # Add cluster configuration to report
+          if [[ -f "terraform/terraform.tfstate" ]]; then
+            cd terraform
+            echo "### Terraform Configuration" >> ../scaling-report.md
+            echo '```' >> ../scaling-report.md
+            terraform output >> ../scaling-report.md
+            echo '```' >> ../scaling-report.md
+            cd ..
+          fi
+          
+          # Add Kubernetes status to report
+          if [[ -f "kubeconfig" ]]; then
+            echo "### Kubernetes Cluster Status" >> scaling-report.md
+            echo '```' >> scaling-report.md
+            KUBECONFIG="./kubeconfig" kubectl get nodes >> scaling-report.md
+            echo "" >> scaling-report.md
+            KUBECONFIG="./kubeconfig" kubectl get pods -A >> scaling-report.md
+            echo '```' >> scaling-report.md
+          fi
+          
+          echo "Scaling report generated: scaling-report.md"
+
+      - name: Upload scaling report
+        if: inputs.dry_run != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-report-${{ inputs.environment }}-${{ github.run_number }}
+          path: scaling-report.md
+          retention-days: 30
+
+      - name: Notify scaling completion
+        if: inputs.dry_run != 'true'
+        run: |
+          echo "🎉 Cluster scaling completed successfully!"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Cluster: ${{ inputs.cluster_name }}"
+          echo "Preset: ${{ inputs.preset }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Verify your applications are running correctly"
+          echo "2. Monitor cluster performance and resource usage"
+          echo "3. Update your monitoring and alerting configurations if needed"
