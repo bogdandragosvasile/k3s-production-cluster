@@ -1,15 +1,6 @@
 # K3s Production Cluster - Robust Terraform Configuration
 # Based on patterns from k8s-libvirt-cluster repository
 
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    libvirt = {
-      source  = "dmacvicar/libvirt"
-      version = "~> 0.8.3"
-    }
-  }
-}
 
 provider "libvirt" {
   uri = "qemu:///system"
