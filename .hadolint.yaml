@@ -1,0 +1,7 @@
+# Hadolint configuration for Dockerfile linting
+ignore:
+  - DL3008  # Pin versions in apt get install
+  - DL3009  # Delete the apt-get cache after installing something
+  - DL3015  # Avoid additional packages by specifying --no-install-recommends
+  - DL4000  # MAINTAINER is deprecated
+  - DL4006  # Set the SHELL option -o pipefail before RUN with a pipe in

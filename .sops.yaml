@@ -1,0 +1,11 @@
+# SOPS configuration for encrypting sensitive files
+creation_rules:
+  - path_regex: \.env$
+    pgp: >-
+      YOUR_PGP_KEY_ID_HERE
+  - path_regex: terraform\.tfvars$
+    pgp: >-
+      YOUR_PGP_KEY_ID_HERE
+  - path_regex: \.secrets\.yaml$
+    pgp: >-
+      YOUR_PGP_KEY_ID_HERE

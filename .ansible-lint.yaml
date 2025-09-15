@@ -1,0 +1,63 @@
+# Ansible Lint configuration for K3s Production Cluster
+# Provides comprehensive Ansible playbook and role linting
+
+# Use a strict profile for production infrastructure
+profile: production
+
+# Skip certain rules that may not apply to our use case
+skip_list:
+  - yaml[line-length]  # Allow longer lines for readability
+  - name[casing]       # Allow mixed case in task names
+  - risky-shell-pipe   # Allow shell pipes where necessary
+
+# Enable additional rules
+enable_list:
+  - no-same-owner
+  - no-tabs
+  - yaml[truthy]
+  - yaml[comments-indentation]
+
+# Exclude certain directories and files
+exclude_paths:
+  - .github/
+  - .git/
+  - terraform/
+  - docs/
+  - backup/
+  - monitoring/
+  - vm-templates/
+  - "*.backup"
+  - "*.example"
+
+# Set verbosity level
+verbosity: 1
+
+# Use offline mode for better performance
+offline: true
+
+# Set the working directory
+mock_roles_path: ansible/roles
+
+# Mock modules for testing
+mock_modules:
+  - kubernetes.core
+  - community.general
+  - community.crypto
+
+# Set minimum Ansible version
+min_ansible_version: "2.9"
+
+# Use strict mode
+strict: true
+
+# Set custom rules directory (if needed)
+rulesdir: []
+
+# Mock handlers for testing
+mock_handlers: true
+
+# Mock variables for testing
+mock_variables:
+  - cluster_name: "test-cluster"
+  - ansible_user: "ubuntu"
+  - ansible_ssh_private_key_file: "~/.ssh/id_rsa"
