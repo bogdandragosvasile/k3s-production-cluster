@@ -23,7 +23,7 @@ env:
 jobs:
   preflight:
     name: Preflight Checks
-    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     outputs:
       runner-valid: ${{ steps.preflight.result }}
     steps:
@@ -40,7 +40,7 @@ jobs:
   terraform_infra:
     name: Terraform Infrastructure
     needs: preflight
-    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -76,7 +76,7 @@ jobs:
   ansible_k3s:
     name: Install K3s
     needs: [preflight, terraform_infra]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -94,7 +94,7 @@ jobs:
   validate:
     name: Validate Cluster
     needs: [preflight, terraform_infra, ansible_k3s]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -117,7 +117,7 @@ jobs:
   notify:
     name: Notify Completion
     needs: [preflight, terraform_infra, ansible_k3s, validate]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
     if: always()
     steps:
       - name: Notify completion
