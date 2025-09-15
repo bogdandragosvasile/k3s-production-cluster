@@ -1,0 +1,225 @@
+---
+- name: Setup HA kubectl Access
+  hosts: localhost
+  gather_facts: no
+  vars:
+    kubeconfig_path: "./kubeconfig"
+    kubeconfig_ha_path: "./kubeconfig-ha.yaml"
+    kubeconfig_original_path: "./kubeconfig-original.yaml"
+    lb1_ip: "192.168.122.41"
+    lb2_ip: "192.168.122.42"
+    master_ip: "192.168.122.11"
+    kubernetes_api_port: 6443
+
+  tasks:
+    - name: Download kubeconfig from master node
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+      delegate_to: "{{ master_ip }}"
+      become: yes
+
+    - name: Update kubeconfig server address to master IP
+      replace:
+        path: "{{ kubeconfig_path }}"
+        regexp: '127\.0\.0\.1'
+        replace: "{{ master_ip }}"
+
+    - name: Set kubeconfig permissions
+      file:
+        path: "{{ kubeconfig_path }}"
+        mode: '0600'
+
+    - name: Create backup of original kubeconfig
+      copy:
+        src: "{{ kubeconfig_path }}"
+        dest: "{{ kubeconfig_original_path }}"
+        remote_src: yes
+
+    - name: Create HA kubeconfig pointing to LB1
+      copy:
+        src: "{{ kubeconfig_path }}"
+        dest: "{{ kubeconfig_ha_path }}"
+        remote_src: yes
+
+    - name: Update HA kubeconfig server address to LB1
+      replace:
+        path: "{{ kubeconfig_ha_path }}"
+        regexp: 'server: https://.*:{{ kubernetes_api_port }}'
+        replace: 'server: https://{{ lb1_ip }}:{{ kubernetes_api_port }}'
+
+    - name: Test original kubeconfig connectivity
+      command: kubectl get nodes
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: original_kubeconfig_test
+      failed_when: false
+
+    - name: Display original kubeconfig test result
+      debug:
+        msg: "Original kubeconfig: {{ 'SUCCESS' if original_kubeconfig_test.rc == 0 else 'FAILED' }}"
+
+    - name: Test HA kubeconfig connectivity (with insecure flag)
+      command: kubectl get nodes --insecure-skip-tls-verify
+      environment:
+        KUBECONFIG: "{{ kubeconfig_ha_path }}"
+      register: ha_kubeconfig_test
+      failed_when: false
+
+    - name: Display HA kubeconfig test result
+      debug:
+        msg: "HA kubeconfig: {{ 'SUCCESS' if ha_kubeconfig_test.rc == 0 else 'FAILED' }}"
+
+    - name: Test LB1 direct access
+      command: kubectl get nodes --server=https://{{ lb1_ip }}:{{ kubernetes_api_port }} --insecure-skip-tls-verify
+      environment:
+        KUBECONFIG: "{{ kubeconfig_ha_path }}"
+      register: lb1_test
+      failed_when: false
+
+    - name: Display LB1 test result
+      debug:
+        msg: "LB1 direct access: {{ 'SUCCESS' if lb1_test.rc == 0 else 'FAILED' }}"
+
+    - name: Test LB2 direct access
+      command: kubectl get nodes --server=https://{{ lb2_ip }}:{{ kubernetes_api_port }} --insecure-skip-tls-verify
+      environment:
+        KUBECONFIG: "{{ kubeconfig_ha_path }}"
+      register: lb2_test
+      failed_when: false
+
+    - name: Display LB2 test result
+      debug:
+        msg: "LB2 direct access: {{ 'SUCCESS' if lb2_test.rc == 0 else 'FAILED' }}"
+
+    - name: Create kubectl aliases script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # K3s kubectl aliases for different access methods
+          
+          # Original direct access
+          alias kubectl-original='KUBECONFIG=./kubeconfig-original.yaml kubectl'
+          
+          # HA Load Balancer access (default)
+          alias kubectl-ha='KUBECONFIG=./kubeconfig-ha.yaml kubectl --insecure-skip-tls-verify'
+          
+          # Direct master access
+          alias kubectl-master1='KUBECONFIG=./kubeconfig-original.yaml kubectl --server=https://192.168.122.11:6443'
+          alias kubectl-master2='KUBECONFIG=./kubeconfig-original.yaml kubectl --server=https://192.168.122.12:6443'
+          alias kubectl-master3='KUBECONFIG=./kubeconfig-original.yaml kubectl --server=https://192.168.122.13:6443'
+          
+          # Load balancer access
+          alias kubectl-lb1='KUBECONFIG=./kubeconfig-ha.yaml kubectl --server=https://192.168.122.41:6443 --insecure-skip-tls-verify'
+          alias kubectl-lb2='KUBECONFIG=./kubeconfig-ha.yaml kubectl --server=https://192.168.122.42:6443 --insecure-skip-tls-verify'
+          
+          # Quick status check
+          alias k8s-status='kubectl-ha get nodes && echo "---" && kubectl-ha get pods -A'
+          
+          echo "Kubectl aliases loaded:"
+          echo "  kubectl-ha     - HA Load Balancer access (default)"
+          echo "  kubectl-original - Direct master access"
+          echo "  kubectl-master1/2/3 - Direct master access"
+          echo "  kubectl-lb1/2  - Direct LB access"
+          echo "  k8s-status     - Quick cluster status"
+        dest: "./kubectl-aliases.sh"
+        mode: '0755'
+
+    - name: Create HA monitoring script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Monitor HA kubectl access health
+          
+          set -euo pipefail
+          
+          # Colors
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[1;33m'
+          BLUE='\033[0;34m'
+          NC='\033[0m'
+          
+          # Configuration
+          LB1_IP="192.168.122.41"
+          LB2_IP="192.168.122.42"
+          MASTER1_IP="192.168.122.11"
+          MASTER2_IP="192.168.122.12"
+          MASTER3_IP="192.168.122.13"
+          
+          log() {
+              echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+          }
+          
+          log_success() {
+              echo -e "${GREEN}✅ $1${NC}"
+          }
+          
+          log_warning() {
+              echo -e "${YELLOW}⚠️  $1${NC}"
+          }
+          
+          log_error() {
+              echo -e "${RED}❌ $1${NC}"
+          }
+          
+          check_endpoint() {
+              local name="$1"
+              local endpoint="$2"
+              
+              if KUBECONFIG="./kubeconfig-ha.yaml" kubectl get nodes --server="$endpoint" --insecure-skip-tls-verify &>/dev/null; then
+                  log_success "$name: $endpoint"
+                  return 0
+              else
+                  log_error "$name: $endpoint"
+                  return 1
+              fi
+          }
+          
+          log "Checking HA kubectl endpoints..."
+          
+          # Check load balancers
+          check_endpoint "LB1" "https://${LB1_IP}:6443"
+          check_endpoint "LB2" "https://${LB2_IP}:6443"
+          
+          # Check masters
+          check_endpoint "Master1" "https://${MASTER1_IP}:6443"
+          check_endpoint "Master2" "https://${MASTER2_IP}:6443"
+          check_endpoint "Master3" "https://${MASTER3_IP}:6443"
+          
+          # Check HA kubeconfig
+          if KUBECONFIG="./kubeconfig-ha.yaml" kubectl get nodes --insecure-skip-tls-verify &>/dev/null; then
+              log_success "HA kubeconfig working"
+          else
+              log_error "HA kubeconfig failed"
+          fi
+          
+          log "HA kubectl monitoring complete"
+        dest: "./scripts/monitor-ha-kubectl.sh"
+        mode: '0755'
+
+    - name: Display HA kubectl setup summary
+      debug:
+        msg: |
+          HA kubectl Access Setup Complete!
+          ===================================
+          Load Balancer 1: {{ lb1_ip }}:{{ kubernetes_api_port }}
+          Load Balancer 2: {{ lb2_ip }}:{{ kubernetes_api_port }}
+          Master 1: 192.168.122.11:{{ kubernetes_api_port }}
+          Master 2: 192.168.122.12:{{ kubernetes_api_port }}
+          Master 3: 192.168.122.13:{{ kubernetes_api_port }}
+          
+          Files created:
+            kubeconfig - Original kubeconfig (direct master access)
+            kubeconfig-ha.yaml - HA kubeconfig (uses LB1)
+            kubectl-aliases.sh - Command aliases
+            scripts/monitor-ha-kubectl.sh - Health monitoring
+          
+          Usage:
+            kubectl get nodes                    # HA access via LB1
+            kubectl-lb2 get nodes               # Direct LB2 access
+            kubectl-master1 get nodes           # Direct master1 access
+            ./scripts/monitor-ha-kubectl.sh     # Check all endpoints
