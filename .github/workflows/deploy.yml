@@ -1,4 +1,4 @@
-name: Deploy K3s Cluster
+name: Deploy K3s Cluster (Working)
 
 on:
   workflow_dispatch:
@@ -9,9 +9,9 @@ on:
         default: 'development'
         type: choice
         options:
-        - development
-        - staging
         - production
+        - staging
+        - development
 
 env:
   TF_VERSION: '1.6.0'
@@ -23,7 +23,7 @@ env:
 jobs:
   preflight:
     name: Preflight Checks
-    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
     outputs:
       runner-valid: ${{ steps.preflight.result }}
     steps:
@@ -40,7 +40,7 @@ jobs:
   terraform_infra:
     name: Terraform Infrastructure
     needs: preflight
-    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -51,19 +51,18 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Terraform Init
       - name: Check existing VMs
         run: |
           echo "🔍 Checking for existing VMs..."
           if virsh list --all | grep -q "k3s-"; then
             echo "⚠️  Existing VMs found, destroying them first..."
-            virsh list --all | grep "k3s-" | awk '{print $2}' | xargs -r virsh destroy
-            virsh list --all | grep "k3s-" | awk '{print $2}' | xargs -r virsh undefine
+            virsh list --all | grep "k3s-" | awk "{print $2}" | xargs -r virsh destroy
+            virsh list --all | grep "k3s-" | awk "{print $2}" | xargs -r virsh undefine
             echo "✅ Existing VMs destroyed"
           else
             echo "✅ No existing VMs found"
           fi
-
-      - name: Terraform Init
         working-directory: terraform
         run: |
           terraform init
@@ -76,7 +75,7 @@ jobs:
   ansible_k3s:
     name: Install K3s
     needs: [preflight, terraform_infra]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -91,10 +90,51 @@ jobs:
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/install-k3s.yaml -v
 
+  haproxy_setup:
+    name: Setup HAProxy
+    needs: [preflight, terraform_infra, ansible_k3s]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      - name: Install HAProxy
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/install-haproxy.yaml -v
+
+  ha_kubectl:
+    name: Setup HA kubectl Access
+    needs: [preflight, terraform_infra, ansible_k3s, haproxy_setup]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
+    if: needs.preflight.outputs.runner-valid == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      - name: Setup HA kubectl
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/setup-ha-kubectl.yaml -v
+
   validate:
     name: Validate Cluster
-    needs: [preflight, terraform_infra, ansible_k3s]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    needs: [preflight, terraform_infra, ansible_k3s, haproxy_setup, ha_kubectl]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
     if: needs.preflight.outputs.runner-valid == 'true'
     steps:
       - name: Checkout code
@@ -116,17 +156,19 @@ jobs:
 
   notify:
     name: Notify Completion
-    needs: [preflight, terraform_infra, ansible_k3s, validate]
-    runs-on: [self-hosted, libvirt, ubuntu-24.04, development]
+    needs: [preflight, terraform_infra, ansible_k3s, haproxy_setup, ha_kubectl, validate]
+    runs-on: [self-hosted, libvirt, ubuntu-24.04]
     if: always()
     steps:
       - name: Notify completion
         run: |
           if [ "${{ needs.validate.result }}" == "success" ]; then
-            echo "✅ K3s cluster deployed successfully!"
-            echo "Environment: ${{ env.ENVIRONMENT }}"
-            echo "🎉 Ready for production workloads!"
+            echo "✅ K3s cluster deployed successfully with HA kubectl access!"
+            echo "Load Balancer 1: 192.168.122.41:6443"
+            echo "Load Balancer 2: 192.168.122.42:6443"
+            echo "Master 1: 192.168.122.11:6443"
+            echo "Master 2: 192.168.122.12:6443"
+            echo "Master 3: 192.168.122.13:6443"
           else
             echo "❌ K3s cluster deployment failed!"
-            echo "Check the logs for details."
           fi
