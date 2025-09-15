@@ -84,7 +84,7 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Download Terraform State
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v5
         with:
           name: terraform-logs
           path: terraform/
