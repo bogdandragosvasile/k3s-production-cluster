@@ -50,11 +50,11 @@ echo ""
 echo "📋 Checking required tools..."
 
 # Check basic tools
-check_command "virsh" "libvirt CLI" || log_warning "libvirt default pool: Not available (non-critical)"
-check_command "qemu-system-x86_64" "QEMU KVM" || log_warning "libvirt default pool: Not available (non-critical)"
-check_command "terraform" "Terraform" || log_warning "libvirt default pool: Not available (non-critical)"
-check_command "ansible" "Ansible" || log_warning "libvirt default pool: Not available (non-critical)"
-check_command "kubectl" "kubectl" || log_warning "libvirt default pool: Not available (non-critical)"
+check_command "virsh" "libvirt CLI" || echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
+check_command "qemu-system-x86_64" "QEMU KVM" || echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
+check_command "terraform" "Terraform" || echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
+check_command "ansible" "Ansible" || echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
+check_command "kubectl" "kubectl" || echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 
 echo ""
 echo "🔐 Checking permissions..."
@@ -65,14 +65,14 @@ if virsh version >/dev/null 2>&1; then
     echo -e "${GREEN}✅ virsh version: Working${NC}"
 else
     echo -e "${RED}❌ virsh version: Failed - check libvirt group membership${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 if virsh list >/dev/null 2>&1; then
     echo -e "${GREEN}✅ virsh list: Working${NC}"
 else
     echo -e "${RED}❌ virsh list: Failed - check libvirt group membership${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 # Check if user is in libvirt group
@@ -90,7 +90,7 @@ if systemctl is-active --quiet libvirtd; then
     echo -e "${GREEN}✅ libvirtd service: Running${NC}"
 else
     echo -e "${RED}❌ libvirtd service: Not running${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 # Check default pool
@@ -98,7 +98,7 @@ if virsh pool-list --all | grep -q "default.*active"; then
     echo -e "${GREEN}✅ libvirt default pool: Available${NC}"
 else
     echo -e "${RED}❌ libvirt default pool: Not available${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 # Check default network
@@ -106,7 +106,7 @@ if virsh net-list --all | grep -q "default.*active"; then
     echo -e "${GREEN}✅ libvirt default network: Available${NC}"
 else
     echo -e "${RED}❌ libvirt default network: Not available${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 echo ""
@@ -117,7 +117,7 @@ if [[ -d ".git" ]]; then
     echo -e "${GREEN}✅ Git repository: Detected${NC}"
 else
     echo -e "${RED}❌ Git repository: Not detected${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 # Check required directories
@@ -126,7 +126,7 @@ for dir in "terraform" "ansible" "scripts"; do
         echo -e "${GREEN}✅ Directory $dir: Exists${NC}"
     else
         echo -e "${RED}❌ Directory $dir: Missing${NC}"
-        log_warning "libvirt default pool: Not available (non-critical)"
+        echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
     fi
 done
 
@@ -147,7 +147,7 @@ elif [[ -f "$HOME/.ssh/id_rsa" ]]; then
     echo -e "${YELLOW}⚠️  SSH private key: Using ~/.ssh/id_rsa (deprecated)${NC}"
 else
     echo -e "${RED}❌ SSH private key: Not found${NC}"
-    log_warning "libvirt default pool: Not available (non-critical)"
+    echo -e "${YELLOW}⚠️  libvirt default pool: Not available (non-critical)${NC}"
 fi
 
 echo ""
